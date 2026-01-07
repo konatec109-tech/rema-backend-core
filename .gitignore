@@ -1,0 +1,19 @@
+# --- 1. GARDE LE PYTHON (C'est tout ce qu'on veut) ---
+# On n'ignore PAS main.py, requirements.txt et le dossier app
+
+# --- 2. IGNORE TOUT LE RESTE (Radical) ---
+# On bloque totalement les dossiers Flutter et SDK pour l'envoi au serveur
+rema_industrial/
+rema_industrial_sdk/
+mobile_app_flutter/
+
+# --- 3. FICHIERS SYSTÈME ---
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+*.hprof
+*.log
+.vscode/
+.idea/
