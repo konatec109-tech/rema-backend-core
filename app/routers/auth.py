@@ -4,40 +4,40 @@ from fastapi.security.oauth2 import OAuth2PasswordRequestForm
 from app.core import database
 from app import schemas, models, utils, oauth2
 
-router = APIRouter(tags=['Authentication'])
+router = APIRouter()
 
+# --- INSCRIPTION (SIGNUP) ---
 @router.post('/signup', status_code=status.HTTP_201_CREATED, response_model=schemas.UserResponse)
 def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     
-    # 1. On utilise 'user.phone' (comme envoyé par Flutter)
-    existing_user = db.query(models.User).filter(models.User.phone_number == user.phone).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Ce numéro est déjà inscrit")
+    # 1. Vérification doublon
+    if db.query(models.User).filter(models.User.phone_number == user.phone).first():
+        raise HTTPException(status_code=400, detail="Numéro déjà utilisé")
 
-    # 2. On hache le 'pin_hash' reçu
+    # 2. Hachage du PIN
     hashed_pin = utils.hash(user.pin_hash)
 
-    # 3. On remplit la base de données (Mapping)
+    # 3. Création (Mapping Flutter -> DB)
     new_user = models.User(
-        phone_number=user.phone,     # On met 'phone' dans 'phone_number'
-        hashed_password=hashed_pin,
+        phone_number=user.phone,     # On range 'phone' dans 'phone_number'
+        hashed_password=hashed_pin,  # On range le hash
         full_name=user.full_name,
-        role=user.role
+        role=user.role,
+        balance=50000.0              # Bonus forcé
     )
     
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-
     return new_user
 
-# ... La route Login ne change pas, laisse-la telle quelle ou recopie-la ...
+# --- CONNEXION (LOGIN) ---
 @router.post('/login', response_model=schemas.Token)
 def login(user_credentials: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.phone_number == user_credentials.username).first()
-    if not user:
+    
+    if not user or not utils.verify(user_credentials.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Identifiants invalides")
-    if not utils.verify(user_credentials.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Identifiants invalides")
-    access_token = oauth2.create_access_token(data={"user_id": str(user.id)})
-    return {"access_token": access_token, "token_type": "bearer"}
+    
+    token = oauth2.create_access_token(data={"user_id": str(user.id)})
+    return {"access_token": token, "token_type": "bearer"}

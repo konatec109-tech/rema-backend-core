@@ -4,15 +4,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import engine, Base
 from app.routers import auth, users, transactions
-from app import models
 
-# --- INIT DB ---
+# --- 1. INITIALISATION DE LA BASE (Crée la table users_industrial) ---
 Base.metadata.create_all(bind=engine)
 
-# --- CONFIG API ---
-app = FastAPI(title="REMA INDUSTRIAL API", version="2.0.0")
+# --- 2. CONFIG API ---
+app = FastAPI(title="REMA INDUSTRIAL API", version="3.0.0")
 
-# --- CORS (INDISPENSABLE) ---
+# --- 3. SÉCURITÉ CORS (Vital pour mobile) ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -21,19 +20,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- ROUTES (LA CLÉ EST ICI) ---
-# 👇 C'est cette ligne qui répare ton erreur 404
-app.include_router(auth.router, prefix="/auth") 
+# --- 4. ROUTES (LE CORRECTIF EST LÀ) ---
+# 👇 On ajoute le préfixe /auth pour correspondre à Flutter
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 
-app.include_router(users.router)
-app.include_router(transactions.router)
+# Les autres routes
+app.include_router(users.router, tags=["Users"])
+app.include_router(transactions.router, tags=["Transactions"])
 
-# --- HEALTH CHECK ---
 @app.get("/")
 def health_check():
-    return {"status": "REMA ONLINE", "platform": "Render"}
+    return {"status": "REMA ONLINE", "version": "V3.0 GOZEM READY"}
 
-# --- START ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
