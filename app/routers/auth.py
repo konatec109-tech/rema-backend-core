@@ -11,19 +11,22 @@ router = APIRouter()
 def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     
     # 1. Vérification doublon
-    if db.query(models.User).filter(models.User.phone_number == user.phone).first():
-        raise HTTPException(status_code=400, detail="Numéro déjà utilisé")
+    existing_user = db.query(models.User).filter(models.User.phone_number == user.phone).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Ce numéro est déjà utilisé")
 
-    # 2. Hachage du PIN
-    hashed_pin = utils.hash(user.pin_hash)
+    # 2. GESTION DU HASH (Correction du crash 72 bytes)
+    # Puisque Flutter envoie déjà un hash Ed25519 (très long), 
+    # on le stocke directement pour éviter que Bcrypt ne crash.
+    stored_password = user.pin_hash 
 
-    # 3. Création (Mapping Flutter -> DB)
+    # 3. Création de l'utilisateur
     new_user = models.User(
-        phone_number=user.phone,     # On range 'phone' dans 'phone_number'
-        hashed_password=hashed_pin,  # On range le hash
+        phone_number=user.phone,
+        hashed_password=stored_password, # On stocke la clé Ed25519
         full_name=user.full_name,
         role=user.role,
-        balance=50000.0              # Bonus forcé
+        balance=50000.0 # Bonus Gozem Ready !
     )
     
     db.add(new_user)
@@ -34,10 +37,16 @@ def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
 # --- CONNEXION (LOGIN) ---
 @router.post('/login', response_model=schemas.Token)
 def login(user_credentials: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
+    # On cherche l'utilisateur par son numéro (username dans OAuth2)
     user = db.query(models.User).filter(models.User.phone_number == user_credentials.username).first()
     
-    if not user or not utils.verify(user_credentials.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Identifiants invalides")
+    # Correction de la vérification : On compare directement les deux hashs longs
+    if not user or user.hashed_password != user_credentials.password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Identifiants invalides"
+        )
     
+    # Création du token
     token = oauth2.create_access_token(data={"user_id": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
