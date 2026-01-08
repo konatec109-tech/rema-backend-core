@@ -2,30 +2,28 @@ from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.security.oauth2 import OAuth2PasswordRequestForm
 
-# Import de tes modules internes
+# Assure-toi que les imports correspondent à tes dossiers
 from app.core import database
 from app import schemas, models, utils, oauth2
 
 router = APIRouter(tags=['Authentication'])
 
-# 👇👇👇 C'EST CETTE FONCTION QUI MANQUAIT ! 👇👇👇
-@router.post('/signup', status_code=status.HTTP_201_CREATED)
+# 👇 LA FONCTION SIGNUP (INSCRIPTION) RESTAURÉE
+@router.post('/signup', status_code=status.HTTP_201_CREATED, response_model=schemas.UserResponse)
 def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     
     # 1. Vérifier si le numéro existe déjà
-    existing_user = db.query(models.User).filter(models.User.phone_number == user.phone).first()
+    existing_user = db.query(models.User).filter(models.User.phone_number == user.phone_number).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Ce numéro est déjà inscrit")
 
-    # 2. Hacher le PIN (Sécurité)
-    hashed_pin = utils.hash(user.pin_hash)
-    user.pin_hash = hashed_pin # On remplace le PIN clair par le hash
+    # 2. Hacher le PIN
+    hashed_pin = utils.hash(user.password)
 
-    # 3. Sauvegarder dans la base de données
-    # Attention : On mappe les champs du JSON vers le modèle SQL
+    # 3. Créer l'utilisateur (Avec les 50 000 par défaut du models.py)
     new_user = models.User(
-        phone_number=user.phone,     # Adapte selon ton models.py (souvent phone_number)
-        hashed_password=hashed_pin,  # Adapte selon ton models.py
+        phone_number=user.phone_number,
+        hashed_password=hashed_pin,
         full_name=user.full_name,
         role=user.role
     )
@@ -34,12 +32,8 @@ def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     db.commit()
     db.refresh(new_user)
 
-    # 4. On retourne l'utilisateur créé (avec le solde par défaut)
-    # Ton rema_pay.dart attend un champ 'balance', assure-toi que ton schema UserOut l'a
+    # 4. On renvoie l'utilisateur (avec le champ balance inclus grâce au schéma)
     return new_user
-
-# 👆👆👆 FIN DE L'AJOUT 👆👆👆
-
 
 @router.post('/login', response_model=schemas.Token)
 def login(user_credentials: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
