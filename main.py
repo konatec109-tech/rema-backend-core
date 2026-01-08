@@ -10,12 +10,9 @@ from app import models
 Base.metadata.create_all(bind=engine)
 
 # --- CONFIG API ---
-app = FastAPI(
-    title="REMA INDUSTRIAL API",
-    version="2.0.0"
-)
+app = FastAPI(title="REMA INDUSTRIAL API", version="2.0.0")
 
-# --- CORS (CRITIQUE pour le mobile) ---
+# --- CORS (INDISPENSABLE) ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -24,9 +21,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- ROUTES (LA CORRECTION EST ICI) ---
-# 👇 On ajoute prefix="/auth" pour correspondre à Flutter
-app.include_router(auth.router, prefix="/auth")
+# --- ROUTES (LA CLÉ EST ICI) ---
+# 👇 C'est cette ligne qui répare ton erreur 404
+app.include_router(auth.router, prefix="/auth") 
 
 app.include_router(users.router)
 app.include_router(transactions.router)
