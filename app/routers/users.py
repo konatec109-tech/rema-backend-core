@@ -1,105 +1,96 @@
-from fastapi import APIRouter, status, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.core import database 
-from app import models, schemas, utils, oauth2 # <--- C'est souvent oauth2 qui manque
+from app.core import database
+from app import models
+from pydantic import BaseModel
 
-router = APIRouter(
-    prefix="/users",
-    tags=["Users"]
-)
+router = APIRouter(prefix="/users")
 
-# ==============================================================================
-# 1. INSCRIPTION (Sign Up)
-# ==============================================================================
-@router.post("/", status_code=status.HTTP_201_CREATED, response_model=schemas.UserResponse)
-def create_user(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
+# --- MODÈLES POUR LES REQUÊTES (Validation des données) ---
+class RechargeRequest(BaseModel):
+    phone: str
+    amount: float
+
+class SyncRequest(BaseModel):
+    sender_phone: str
+    amount: float
+    tx_id: str
+
+# --- 1. VOIR LE SOLDE (Cloud vs Offline) ---
+# Utile pour afficher "Banque: 40.000F | Coffre: 10.000F" sur Flutter
+@router.get("/{phone}/balance")
+def get_balance(phone: str, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.phone_number == phone).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
     
-    # A. Vérification si le numéro existe déjà
-    existing_user = db.query(models.User).filter(models.User.phone_number == user.phone_number).first()
-    if existing_user:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ce numéro existe déjà.")
-
-    # B. Hachage du mot de passe (Sécurité)
-    hashed_pwd = utils.hash(user.password)
+    # Calcul du solde disponible en ligne
+    online_balance = user.balance - user.offline_reserved_amount
     
-    # C. Création de l'utilisateur
-    # ⚠️ IMPORTANT : On ne fait pas **user.dict() car models.User attend 'hashed_password', pas 'password'
-    new_user = models.User(
-        phone_number=user.phone_number,
-        full_name=user.full_name,
-        hashed_password=hashed_pwd, # On insère le hash ici
-        
-        # --- BONUS TEST ARCHITECTE ---
-        # On donne 50.000 FCFA dès l'inscription pour faciliter ta démo ce soir
-        balance=50000.0,
-        offline_reserved_amount=0.0
-    )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    return new_user
-
-# ==============================================================================
-# 2. VOIR SON PROFIL
-# ==============================================================================
-@router.get("/me", response_model=schemas.UserResponse)
-def get_current_user_profile(current_user: models.User = Depends(oauth2.get_current_user)):
-    return current_user
-
-# ==============================================================================
-# 3. DEVICE BINDING (RECHARGEMENT OFFLINE)
-# ==============================================================================
-@router.post("/offline/activate")
-def activate_offline_mode(
-    amount: float,
-    db: Session = Depends(database.get_db),
-    # ✅ SÉCURITÉ JWT ACTIVÉE : On exige un token valide ici
-    current_user: models.User = Depends(oauth2.get_current_user)
-):
-    """
-    SÉCURISATION DES FONDS (Fund Locking).
-    Nécessite le Token JWT envoyé par Flutter.
-    """
-    
-    # ÉTAPE A : Calcul de la vérité financière
-    # Disponible = Ce que j'ai TOTAL - Ce que j'ai déjà mis dans ma poche offline
-    available_funds = current_user.balance - current_user.offline_reserved_amount
-    
-    # On ajoute une petite tolérance (0.01) pour les calculs flottants
-    if amount > (available_funds + 0.01):
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Fonds insuffisants. Solde total: {current_user.balance}, mais disponible en ligne: {available_funds}."
-        )
-
-    # ÉTAPE B : Le Verrouillage (Commit)
-    # On augmente la réserve. L'argent est maintenant "sorti" du système en ligne.
-    current_user.offline_reserved_amount += amount
-    db.commit()
-
-    print(f"✅ SUCCÈS : {current_user.full_name} a verrouillé {amount} FCFA pour usage Offline.")
-
     return {
-        "status": "OFFLINE_READY",
-        "reserved_amount": current_user.offline_reserved_amount,
-        "message": "Fonds sécurisés et transférés virtuellement au Secure Element."
+        "full_name": user.full_name,
+        "online_balance": online_balance,
+        "offline_vault": user.offline_reserved_amount
     }
-    
-# 👇 AJOUTE ÇA À LA FIN DE users.py
-@router.get("/{pk}/balance")
-def get_user_balance(pk: str, db: Session = Depends(database.get_db)):
-    # On cherche l'utilisateur qui possède cette clé publique
-    # Note: Vérifie que ta table User a bien une colonne 'public_key'
-    user = db.query(models.User).filter(models.User.public_key == pk).first()
-    
-    # Si on ne trouve pas par clé, on cherche par ID (au cas où)
-    if not user:
-        user = db.query(models.User).filter(models.User.id == pk).first()
 
+# --- 2. RECHARGER LE TÉLÉPHONE (Cloud -> Offline) ---
+# Déduit du solde principal pour mettre dans le coffre offline
+@router.post("/recharge-offline")
+def recharge_offline(req: RechargeRequest, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.phone_number == req.phone).first()
+    
     if not user:
-        # Si on ne trouve rien, on renvoie 0 au lieu de crash
-        return {"balance": 0.0}
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
+    # Calcul du solde réellement dispo sur le cloud
+    available_online = user.balance - user.offline_reserved_amount
+    
+    if available_online < req.amount:
+        raise HTTPException(status_code=400, detail="Solde Cloud insuffisant")
+    
+    # On augmente la réserve (l'argent est bloqué pour le offline)
+    user.offline_reserved_amount += req.amount
+    db.commit()
+    
+    return {
+        "status": "success", 
+        "message": f"{req.amount} F transférés vers le coffre offline",
+        "new_offline_vault": user.offline_reserved_amount
+    }
+
+# --- 3. SYNCHRONISATION (Marchand -> Cloud) ---
+# Le marchand envoie la preuve, le serveur déduit définitivement
+@router.post("/sync-payment")
+def sync_payment(req: SyncRequest, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.phone_number == req.sender_phone).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Émetteur non trouvé")
+
+    # Si la réserve offline couvre le paiement
+    if user.offline_reserved_amount >= req.amount:
+        # 1. On diminue la réserve
+        user.offline_reserved_amount -= req.amount
+        # 2. On diminue le solde total (l'argent a été dépensé)
+        user.balance -= req.amount
         
-    return {"balance": user.balance}
+        db.commit()
+        return {"status": "synced", "tx_id": req.tx_id}
+    
+    raise HTTPException(status_code=400, detail="Erreur de réconciliation : Réserve insuffisante")
+
+# --- 4. RÉCUPÉRATION MANUELLE (En cas de perte du tel) ---
+# On remet la réserve à zéro et on rend l'argent au solde cloud
+@router.post("/emergency-refund/{phone}")
+def emergency_refund(phone: str, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.phone_number == phone).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+    
+    amount_to_return = user.offline_reserved_amount
+    user.offline_reserved_amount = 0
+    # On ne touche pas à user.balance car l'argent y est déjà, 
+    # il est juste libéré de sa réserve.
+    
+    db.commit()
+    return {"status": "refunded", "amount_returned": amount_to_return}
