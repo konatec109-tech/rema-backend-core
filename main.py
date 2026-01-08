@@ -15,7 +15,7 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# --- CORS (CRITIQUE) ---
+# --- CORS (CRITIQUE pour le mobile) ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -24,8 +24,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- ROUTES ---
-app.include_router(auth.router)
+# --- ROUTES (LA CORRECTION EST ICI) ---
+# 👇 On ajoute prefix="/auth" pour correspondre à Flutter
+app.include_router(auth.router, prefix="/auth")
+
 app.include_router(users.router)
 app.include_router(transactions.router)
 
