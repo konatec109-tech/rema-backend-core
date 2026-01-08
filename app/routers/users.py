@@ -86,3 +86,20 @@ def activate_offline_mode(
         "reserved_amount": current_user.offline_reserved_amount,
         "message": "Fonds sécurisés et transférés virtuellement au Secure Element."
     }
+    
+# 👇 AJOUTE ÇA À LA FIN DE users.py
+@router.get("/{pk}/balance")
+def get_user_balance(pk: str, db: Session = Depends(database.get_db)):
+    # On cherche l'utilisateur qui possède cette clé publique
+    # Note: Vérifie que ta table User a bien une colonne 'public_key'
+    user = db.query(models.User).filter(models.User.public_key == pk).first()
+    
+    # Si on ne trouve pas par clé, on cherche par ID (au cas où)
+    if not user:
+        user = db.query(models.User).filter(models.User.id == pk).first()
+
+    if not user:
+        # Si on ne trouve rien, on renvoie 0 au lieu de crash
+        return {"balance": 0.0}
+        
+    return {"balance": user.balance}
