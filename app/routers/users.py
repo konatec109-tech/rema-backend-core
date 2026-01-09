@@ -8,9 +8,8 @@ router = APIRouter(prefix="/users")
 
 # --- MODÈLES POUR LES REQUÊTES (Validation des données) ---
 class RechargeRequest(BaseModel):
-    phone: str
     amount: float
-
+    phone: str  # On le met en optionnel pour ne pas bloquer
 class SyncRequest(BaseModel):
     sender_phone: str
     amount: float
