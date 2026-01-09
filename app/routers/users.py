@@ -94,3 +94,28 @@ def emergency_refund(phone: str, db: Session = Depends(database.get_db)):
     
     db.commit()
     return {"status": "refunded", "amount_returned": amount_to_return}
+
+# Ajoutez ceci dans app/routers/users.py
+@router.post("/{phone}/withdraw")
+def withdraw_funds(phone: str, req: RechargeRequest, db: Session = Depends(database.get_db)):
+    # 1. Recherche de l'utilisateur par le téléphone dans l'URL
+    user = db.query(models.User).filter(models.User.phone_number == phone).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
+    # 2. Vérification du solde disponible (Solde total - Montant déjà en coffre)
+    available_online = user.balance - user.offline_reserved_amount
+    
+    if available_online < req.amount:
+        raise HTTPException(status_code=400, detail="Solde Cloud insuffisant")
+    
+    # 3. Débit du Cloud vers la réserve Offline
+    user.offline_reserved_amount += req.amount
+    db.commit()
+    
+    return {
+        "status": "success", 
+        "amount_withdrawn": req.amount,
+        "new_online_balance": user.balance - user.offline_reserved_amount
+    }
