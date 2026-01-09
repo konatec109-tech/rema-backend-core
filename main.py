@@ -48,7 +48,20 @@ def health_check():
         "version": "V3.0 GOZEM READY"
     }
 
-# --- 6. LANCEMENT DU SERVEUR ---
+# --- 6. ☢️ ROUTE D'URGENCE POUR RESET LA DB (GRATUIT) ☢️ ---
+# Appelle cette URL depuis ton navigateur pour effacer et recréer les tables
+@app.get("/force-reset-db-secret-key-123")
+def force_reset_database():
+    try:
+        # 1. On détruit tout (Drop tables)
+        Base.metadata.drop_all(bind=engine)
+        # 2. On reconstruit tout à neuf (Create tables)
+        Base.metadata.create_all(bind=engine)
+        return {"message": "✅ BASE DE DONNÉES RÉINITIALISÉE AVEC SUCCÈS ! Tu peux relancer l'inscription."}
+    except Exception as e:
+        return {"error": f"Erreur lors du reset: {str(e)}"}
+
+# --- 7. LANCEMENT DU SERVEUR ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
