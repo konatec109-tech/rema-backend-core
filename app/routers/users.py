@@ -6,17 +6,17 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/users")
 
-# --- MODÈLES POUR LES REQUÊTES (Validation des données) ---
+# --- MODÈLES DE DONNÉES ---
 class RechargeRequest(BaseModel):
     amount: float
-    phone: str  # On le met en optionnel pour ne pas bloquer
+    phone: str 
+
 class SyncRequest(BaseModel):
     sender_phone: str
     amount: float
     tx_id: str
 
 # --- 1. VOIR LE SOLDE (Cloud vs Offline) ---
-# Utile pour afficher "Banque: 40.000F | Coffre: 10.000F" sur Flutter
 @router.get("/{phone}/balance")
 def get_balance(phone: str, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.phone_number == phone).first()
@@ -32,8 +32,8 @@ def get_balance(phone: str, db: Session = Depends(database.get_db)):
         "offline_vault": user.offline_reserved_amount
     }
 
-# --- 2. RECHARGER LE TÉLÉPHONE (Cloud -> Offline) ---
-# Déduit du solde principal pour mettre dans le coffre offline
+# --- 2. RECHARGER LE TÉLÉPHONE (Standard REMA) ---
+# C'est la seule et unique route que le SDK appelle.
 @router.post("/recharge-offline")
 def recharge_offline(req: RechargeRequest, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.phone_number == req.phone).first()
@@ -41,24 +41,24 @@ def recharge_offline(req: RechargeRequest, db: Session = Depends(database.get_db
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
 
-    # Calcul du solde réellement dispo sur le cloud
+    # Vérification du solde réel disponible
     available_online = user.balance - user.offline_reserved_amount
     
     if available_online < req.amount:
         raise HTTPException(status_code=400, detail="Solde Cloud insuffisant")
     
-    # On augmente la réserve (l'argent est bloqué pour le offline)
+    # Verrouillage des fonds
     user.offline_reserved_amount += req.amount
     db.commit()
     
     return {
         "status": "success", 
-        "message": f"{req.amount} F transférés vers le coffre offline",
-        "new_offline_vault": user.offline_reserved_amount
+        "message": "Transfert vers coffre réussi",
+        "new_offline_vault": user.offline_reserved_amount,
+        "new_online_balance": user.balance - user.offline_reserved_amount
     }
 
 # --- 3. SYNCHRONISATION (Marchand -> Cloud) ---
-# Le marchand envoie la preuve, le serveur déduit définitivement
 @router.post("/sync-payment")
 def sync_payment(req: SyncRequest, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.phone_number == req.sender_phone).first()
@@ -78,8 +78,7 @@ def sync_payment(req: SyncRequest, db: Session = Depends(database.get_db)):
     
     raise HTTPException(status_code=400, detail="Erreur de réconciliation : Réserve insuffisante")
 
-# --- 4. RÉCUPÉRATION MANUELLE (En cas de perte du tel) ---
-# On remet la réserve à zéro et on rend l'argent au solde cloud
+# --- 4. RÉCUPÉRATION MANUELLE (Urgence) ---
 @router.post("/emergency-refund/{phone}")
 def emergency_refund(phone: str, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.phone_number == phone).first()
@@ -88,33 +87,6 @@ def emergency_refund(phone: str, db: Session = Depends(database.get_db)):
     
     amount_to_return = user.offline_reserved_amount
     user.offline_reserved_amount = 0
-    # On ne touche pas à user.balance car l'argent y est déjà, 
-    # il est juste libéré de sa réserve.
     
     db.commit()
     return {"status": "refunded", "amount_returned": amount_to_return}
-
-# Ajoutez ceci dans app/routers/users.py
-@router.post("/{phone}/withdraw")
-def withdraw_funds(phone: str, req: RechargeRequest, db: Session = Depends(database.get_db)):
-    # 1. Recherche de l'utilisateur par le téléphone dans l'URL
-    user = db.query(models.User).filter(models.User.phone_number == phone).first()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
-
-    # 2. Vérification du solde disponible (Solde total - Montant déjà en coffre)
-    available_online = user.balance - user.offline_reserved_amount
-    
-    if available_online < req.amount:
-        raise HTTPException(status_code=400, detail="Solde Cloud insuffisant")
-    
-    # 3. Débit du Cloud vers la réserve Offline
-    user.offline_reserved_amount += req.amount
-    db.commit()
-    
-    return {
-        "status": "success", 
-        "amount_withdrawn": req.amount,
-        "new_online_balance": user.balance - user.offline_reserved_amount
-    }
