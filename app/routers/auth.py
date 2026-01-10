@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 from fastapi.security.oauth2 import OAuth2PasswordRequestForm
 from app.core import database
 from app import schemas, models, utils, oauth2
+import uuid # Nécessaire pour générer la clé publique temporaire
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # --- INSCRIPTION (SIGNUP) ---
-@router.post('/signup', status_code=status.HTTP_201_CREATED, response_model=schemas.UserResponse)
+@router.post('/signup', status_code=status.HTTP_201_CREATED)
 def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     
     # 1. Vérification doublon
@@ -15,38 +16,46 @@ def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     if existing_user:
         raise HTTPException(status_code=400, detail="Ce numéro est déjà utilisé")
 
-    # 2. GESTION DU HASH (Correction du crash 72 bytes)
-    # Puisque Flutter envoie déjà un hash Ed25519 (très long), 
-    # on le stocke directement pour éviter que Bcrypt ne crash.
-    stored_password = user.pin_hash 
+    # 2. Génération Clé Publique (Temporaire)
+    # Comme le modèle user.py exige une public_key unique, on en génère une 
+    # si le front ne l'envoie pas encore, pour éviter le crash "Null Integrity Error".
+    generated_pk = str(uuid.uuid4()).replace("-", "")
 
     # 3. Création de l'utilisateur
     new_user = models.User(
         phone_number=user.phone,
-        hashed_password=stored_password, # On stocke la clé Ed25519
+        # CORRECTION ICI : On utilise le nom exact de la colonne dans user.py
+        pin_hash=user.pin_hash,  
         full_name=user.full_name,
+        public_key=generated_pk, # Obligatoire selon user.py
         role=user.role,
-        balance=50000.0 # Bonus Gozem Ready !
+        balance=50000.0, # Bonus de bienvenue
+        offline_reserved_amount=0.0
     )
     
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    
+    return {
+        "message": "Inscription réussie",
+        "user_id": new_user.id,
+        "balance": new_user.balance
+    }
 
 # --- CONNEXION (LOGIN) ---
-@router.post('/login', response_model=schemas.Token)
+@router.post('/login')
 def login(user_credentials: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
-    # On cherche l'utilisateur par son numéro (username dans OAuth2)
+    
     user = db.query(models.User).filter(models.User.phone_number == user_credentials.username).first()
     
-    # Correction de la vérification : On compare directement les deux hashs longs
-    if not user or user.hashed_password != user_credentials.password:
+    # Correction : On compare user.pin_hash (base) avec user_credentials.password (envoyé par l'app)
+    # Pas de bcrypt ici, juste une comparaison de chaînes strictes
+    if not user or user.pin_hash != user_credentials.password:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
             detail="Identifiants invalides"
         )
     
-    # Création du token
     token = oauth2.create_access_token(data={"user_id": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
