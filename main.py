@@ -7,8 +7,8 @@ from app import models
 from app.routers import auth, users, transactions 
 
 # Création des tables au démarrage
-models.Base.metadata.create_all(bind=database.engine)
-
+# NOUVELLE VERSION (On pointe directement sur database.py)
+database.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="REMA Backend Core")
 
 # --- SÉCURITÉ CORS ---
