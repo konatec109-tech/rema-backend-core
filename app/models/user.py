@@ -1,3 +1,4 @@
+# app/models/user.py
 from sqlalchemy import Column, Integer, String, Float, DateTime
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -13,7 +14,7 @@ class User(Base):
     role = Column(String, default="user")
     
     # Soldes
-    balance = Column(Float, default=50000.0) # Le fameux bonus
+    balance = Column(Float, default=50000.0) 
     offline_reserved_amount = Column(Float, default=0.0)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, BigInteger, DateTime
-from sqlalchemy.sql import func
+# app/models/transaction.py
+from sqlalchemy import Column, Integer, String, Float, Boolean, BigInteger
 from app.core.database import Base
 
 class Transaction(Base):
@@ -12,9 +12,9 @@ class Transaction(Base):
     receiver_pk = Column(String, index=True)
     amount = Column(Float)
     
-    # ✅ LES NOUVELLES COLONNES (INDISPENSABLES POUR L'AUDIT)
-    type = Column(String, default="PAYMENT") # "RECHARGE_OFFLINE", "PAYMENT_OFFLINE"
-    timestamp = Column(BigInteger)           # Stocke l'heure exacte (millisecondes)
+    # Colonnes Audit
+    type = Column(String, default="PAYMENT") 
+    timestamp = Column(BigInteger)           
     status = Column(String, default="COMPLETED")
     signature = Column(String, nullable=True) 
     is_offline_synced = Column(Boolean, default=False)
