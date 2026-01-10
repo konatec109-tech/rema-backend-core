@@ -25,12 +25,8 @@ def verify_ed25519_signature(tx_data):
 def sync_batch_transactions(batch: TransactionBatchRequest, db: Session = Depends(get_db)):
     report = {"processed": 0, "failed": 0, "errors": []}
     
-    # 1. Identifier le Marchand (Celui qui synchronise)
-    # Pour l'instant, on suppose que le device_id est la Clé Publique du marchand
+    # Identifier le Marchand
     merchant = db.query(models.User).filter(models.User.public_key == batch.device_id).first()
-    
-    # Si on ne trouve pas par clé publique, on essaie de trouver un fallback (optionnel)
-    # Note: Dans un vrai système, il faudrait que le marchand soit authentifié via Token.
     
     for tx in batch.transactions:
         # A. Anti-Doublon
@@ -44,34 +40,39 @@ def sync_batch_transactions(batch: TransactionBatchRequest, db: Session = Depend
             report["errors"].append({"id": tx.id, "msg": "Signature Invalide"})
             continue
 
-        # C. MOUVEMENT D'ARGENT (Le Cœur du Système)
-        # Trouver le payeur via sa clé publique
+        # C. Mouvements d'argent
         sender = db.query(models.User).filter(models.User.public_key == tx.sender_pk).first()
         
         if sender:
-            # 1. On vide sa réserve (l'argent bloqué est consommé)
-            # On vérifie qu'il ne passe pas en négatif (sécurité)
             deduction = min(sender.offline_reserved_amount, tx.amount)
             sender.offline_reserved_amount -= deduction
-            
-            # 2. On baisse son solde global (L'argent est parti pour de bon)
             sender.balance -= tx.amount
         
-        # Créditer le Marchand (si identifié)
         if merchant:
             merchant.balance += tx.amount
 
-        # D. Historique
+        # D. Historique (CORRIGÉ AVEC NOUVELLES COLONNES)
         new_tx = models.Transaction(
             transaction_uuid=tx.id,
             sender_pk=tx.sender_pk,
             receiver_pk=tx.receiver_pk if tx.receiver_pk else batch.device_id,
             amount=tx.amount,
+            
+            # ✅ On remplit bien les champs d'audit maintenant
+            type="PAYMENT_OFFLINE",
+            timestamp=tx.timestamp, 
             status="COMPLETED",
-            signature=tx.signature
+            signature=tx.signature,
+            is_offline_synced=True
         )
         db.add(new_tx)
         report["processed"] += 1
         
     db.commit()
+    
+    # E. Renvoi du solde pour mise à jour Flutter
+    if merchant:
+        db.refresh(merchant)
+        report["new_online_balance"] = merchant.balance - merchant.offline_reserved_amount
+
     return report
