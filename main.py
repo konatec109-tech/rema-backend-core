@@ -2,12 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core import database
 from app import models
-
+import uvicorn
+import os
 # On importe tes routeurs
 from app.routers import auth, users, transactions 
 
 # Création des tables au démarrage
 # NOUVELLE VERSION (On pointe directement sur database.py)
+# Au lieu de : models.Base.metadata.create_all(bind=database.engine)
 database.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="REMA Backend Core")
 
@@ -39,3 +41,10 @@ def reset_database():
     models.Base.metadata.drop_all(bind=database.engine)
     models.Base.metadata.create_all(bind=database.engine)
     return {"status": "Database Reset Successful"}
+
+
+if __name__ == "__main__":
+    # Render donne le port via une variable d'environnement PORT
+    port = int(os.environ.get("PORT", 10000))
+    # On lance le serveur sur 0.0.0.0 pour qu'il soit accessible de l'extérieur
+    uvicorn.run(app, host="0.0.0.0", port=port)
