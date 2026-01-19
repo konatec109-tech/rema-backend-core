@@ -1,0 +1,65 @@
+name: rema_ultimate
+description: "Le système de paiement offline ultime."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- ICONS ---
+  cupertino_icons: ^1.0.2
+
+  # --- COEUR DU SYSTÈME (Offline & Bluetooth) ---
+  nearby_connections: ^4.0.0   # Le Bluetooth P2P
+  permission_handler: ^11.0.0  # Pour demander l'autorisation GPS/Bluetooth
+  wakelock_plus: ^1.1.0        # Pour garder l'écran allumé pendant le paiement
+
+  # --- DONNÉES & RÉSEAU ---
+  shared_preferences: ^2.2.0   # Stockage simple (Soldes, Nom)
+  uuid: ^4.0.0                 # Générateur d'ID unique pour les transactions
+  http: ^1.1.0                 # Pour parler au Backend Python (quand internet est là)
+
+  # --- SÉCURITÉ (Crypto Bancaire) ---
+  cryptography: ^2.5.0         # Algorithme Ed25519 (Signatures)
+  flutter_secure_storage: ^9.0.0 # Coffre-fort pour la clé privée
+  local_auth: ^2.1.6           # Biométrie (Empreinte digitale/FaceID)
+
+  # --- DESIGN ---
+  google_fonts: ^6.1.0         # Belles polices (Poppins, Orbitron)
+
+# --- CONFIGURATION AUTOMATIQUE ICONE & SPLASH ---
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+  # On ajoute les générateurs ici
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.3.1
+
+# 1. Configuration de l'ICÔNE
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/logo.png"
+  min_sdk_android: 21 # Support large
+
+# 2. Configuration du LANCEMENT (Splash)
+flutter_native_splash:
+  color: "#ffffff" # Fond blanc (change le code hex si tu veux une autre couleur)
+  image: "assets/logo.png"
+  android_12: 
+    image: "assets/logo.png"
+    color: "#ffffff"
+  android: true
+  ios: true
+
+flutter:
+  uses-material-design: true
+  # ✅ AJOUTE ÇA (Attention : 2 espaces avant 'assets', 4 espaces avant le tiret)
+  assets:
+    - assets/logo.png
