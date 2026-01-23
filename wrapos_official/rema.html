@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REMA PAY | wrap/OS</title>
+    <link rel="icon" type="image/png" href="assets/img/logo.png">
+    <link rel="stylesheet" href="assets/css/style.css">
+    
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;600;800&display=swap" rel="stylesheet">
+    
+</head>
+<body>
+
+    <div class="main-container">
+        
+        <header>
+            <a href="index.html">
+                <img src="assets/img/logo.png" alt="wrap/OS" class="logo-img">
+            </a>
+            <div class="system-status">PRODUIT ACTIF</div>
+        </header>
+
+        <section class="hero" style="min-height: 60vh;">
+            <p class="overline" style="color: #00FF41;">> FINTECH PROTOCOL</p>
+            <h1>REMA PAY</h1>
+            <p class="subtitle">
+                Le premier terminal de paiement mobile qui fonctionne
+                lorsque le réseau s'arrête.
+            </p>
+            <div class="cta-group">
+                <button class="btn btn-primary">TÉLÉCHARGER LE SDK</button>
+                <button class="btn btn-secondary">DOCUMENTATION TECHNIQUE</button>
+            </div>
+        </section>
+
+        <section class="divisions-section">
+            <div class="section-header">
+                <h2>COMMENT ÇA MARCHE ?</h2>
+                <div class="line"></div>
+            </div>
+
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); align-items: center;">
+                
+                <div>
+                    <h3 style="margin-bottom: 20px; font-family: var(--font-mono); color: var(--text-main);">01. DÉCOUVERTE BLE</h3>
+                    <p style="color: var(--text-dim); margin-bottom: 40px;">
+                        REMA utilise un scan Bluetooth Low Energy passif. 
+                        Les terminaux marchands diffusent un identifiant chiffré ("R:...") invisible pour les appareils standards.
+                    </p>
+
+                    <h3 style="margin-bottom: 20px; font-family: var(--font-mono); color: var(--text-main);">02. SIGNATURE ED25519</h3>
+                    <p style="color: var(--text-dim); margin-bottom: 40px;">
+                        Chaque transaction est un contrat numérique signé localement par la clé privée de l'envoyeur. 
+                        Impossible à falsifier, même sans internet.
+                    </p>
+
+                    <h3 style="margin-bottom: 20px; font-family: var(--font-mono); color: var(--text-main);">03. SYNC ASYNCHRONE</h3>
+                    <p style="color: var(--text-dim);">
+                        Dès que le marchand retrouve 1kb de bande passante, le registre local ("Vault") 
+                        est synchronisé avec la Blockchain bancaire via une connexion chiffrée.
+                    </p>
+                </div>
+
+                <div class="card" style="display: flex; align-items: center; justify-content: center; min-height: 450px; position: relative; overflow: visible; border: none; background: transparent;">
+                    
+                    <div style="position: absolute; width: 250px; height: 250px; background: var(--accent); opacity: 0.25; filter: blur(90px); border-radius: 50%;"></div>
+                    
+                    <img src="assets/img/rema_product.png" alt="REMA PAY Interface" style="position: relative; z-index: 2; width: 80%; max-width: 350px; height: auto; object-fit: contain; filter: drop-shadow(0 20px 40px rgba(0,0,0,0.6));">
+
+                </div>
+
+            </div>
+        </section>
+
+        <footer>
+            <div class="footer-content">
+                <div class="col">
+                    <a href="index.html" style="color: var(--text-dim); font-family: var(--font-mono);">← RETOUR ACCUEIL</a>
+                </div>
+                <div class="col right">
+                    <p>© 2026 wrap/OS Technologies.</p>
+                </div>
+            </div>
+        </footer>
+
+    </div>
+    
+    <script src="assets/js/main.js"></script>
+</body>
+</html>

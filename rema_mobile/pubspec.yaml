@@ -1,0 +1,51 @@
+name: rema_ultimate
+description: "Le système de paiement offline ultime."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- CŒURS DU SYSTÈME (VERSIONS BLINDÉES 2025) ---
+  # Client : Mise à jour critique pour le scan Android 13/14
+  flutter_blue_plus: ^1.34.5  
+  # Serveur : Meilleure gestion de la publicité sur Tecno
+  ble_peripheral: ^2.4.0
+  # --- OUTILS ---
+  # Gère le "Nearby" et les nouvelles permissions
+  permission_handler: ^11.3.1 
+  local_auth: ^2.1.6
+  shared_preferences: ^2.3.2
+  http: ^1.2.0
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.2.1
+  dio: ^5.4.0
+  # --- SÉCURITÉ ---
+  cryptography: ^2.7.0
+  flutter_secure_storage: ^9.2.2
+  wakelock_plus: ^1.4.0
+  device_info_plus: ^12.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.png
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/logo.png"
+  min_sdk_android: 21 # Important pour Android
+  adaptive_icon_background: "#FFFF6600" # Couleur de fond Orange REMA
+  adaptive_icon_foreground: "assets/logo.png"

@@ -1,19 +1,85 @@
-# --- 1. GARDE LE PYTHON (C'est tout ce qu'on veut) ---
-# On n'ignore PAS main.py, requirements.txt et le dossier app
-
-# --- 2. IGNORE TOUT LE RESTE (Radical) ---
-# On bloque totalement les dossiers Flutter et SDK pour l'envoi au serveur
-rema_industrial/
-rema_industrial_sdk/
-mobile_app_flutter/
-
-# --- 3. FICHIERS SYSTÈME ---
-__pycache__/
-*.pyc
-venv/
-.venv/
-.env
-*.hprof
+# ====================================
+# 1. GLOBAL (SYSTÈME, LOGS & IDE)
+# ====================================
+.DS_Store
+Thumbs.db
 *.log
+hs_err_pid*.log
+replay_pid*.log
+.history/
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# ====================================
+# 2. SÉCURITÉ (CRUCIAL - NE JAMAIS TOUCHER)
+# ====================================
+.env
+.env.*
+*.jks
+*.keystore
+key.properties
+google-services.json
+GoogleService-Info.plist
+*.pem
+*.key
+credentials.json
+
+# ====================================
+# 3. BACKEND (PYTHON - rema_backend)
+# ====================================
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# ====================================
+# 4. MOBILE (FLUTTER - rema_mobile)
+# ====================================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+flutter_*.png
+
+# ====================================
+# 5. MOBILE (ANDROID SPÉCIFIQUE)
+# ====================================
+**/android/local.properties
+**/android/.gradle/
+**/android/app/build/
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+
+# ====================================
+# 6. MOBILE (iOS SPÉCIFIQUE)
+# ====================================
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.flx
+**/ios/Flutter/gen_snapshot
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/DerivedData/
+
+# ====================================
+# 7. SITE WEB (wrapos_official)
+# ====================================
+# Si tu utilises des outils JS un jour :
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.sass-cache/
+# Fichiers temporaires de design
+*.tmp
+*~

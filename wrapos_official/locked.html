@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RESTRICTED ACCESS | wrap/OS</title>
+    <link rel="icon" type="image/png" href="assets/img/logo.png">
+    <link rel="stylesheet" href="assets/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;600;800&display=swap" rel="stylesheet">
+    <style>
+        /* Style spécifique pour l'effet "Terminal" rouge */
+        .warning-text { color: #EF4444; font-family: var(--font-mono); letter-spacing: 2px; }
+        .input-terminal {
+            background: rgba(0,0,0,0.5); border: 1px solid #EF4444; 
+            color: #EF4444; padding: 15px; font-family: var(--font-mono); 
+            width: 100%; max-width: 300px; text-align: center; margin-top: 20px;
+            outline: none;
+        }
+        .input-terminal:focus { box-shadow: 0 0 20px rgba(239, 68, 68, 0.3); }
+    </style>
+    <link rel="icon" type="image/png" href="assets/img/logo.png">
+</head>
+<body>
+
+    <div class="main-container">
+        
+        <header>
+            <a href="index.html">
+                <img src="assets/img/logo.png" alt="wrap/OS" class="logo-img">
+            </a>
+            <div class="system-status" style="color: #EF4444; border-color: #EF4444; background: rgba(239, 68, 68, 0.1);">
+                SECURITY LEVEL 5
+            </div>
+        </header>
+
+        <section class="hero" style="min-height: 70vh; align-items: center; text-align: center;">
+            
+            <div style="font-size: 4rem; margin-bottom: 20px; color: #EF4444; animation: pulse 2s infinite;">
+                🔒
+            </div>
+
+            <p class="warning-text">ACCÈS RESTREINT</p>
+            
+            <h1 style="font-size: 2.5rem; margin: 20px 0;">W/OS SILICON</h1>
+            
+            <p class="subtitle" style="max-width: 500px; margin: 0 auto 40px auto;">
+                L'architecture des microprocesseurs modulaires est protégée par des brevets industriels en cours de dépôt.
+                <br><br>
+                Cette zone est réservée aux partenaires OEM et aux auditeurs accrédités.
+            </p>
+
+            <div style="width: 100%; display: flex; flex-direction: column; align-items: center;">
+                <label for="code" style="font-family: var(--font-mono); font-size: 0.8rem; color: #888;">SAISIR LA CLÉ DE DÉCHIFFREMENT :</label>
+                <input type="password" id="code" class="input-terminal" placeholder="••••••••••••">
+                <button onclick="alert('⛔ ACCÈS REFUSÉ : Votre IP a été journalisée.')" class="btn" style="margin-top: 20px; border: 1px solid #EF4444; color: #EF4444; background: transparent;">
+                    AUTHENTIFIER
+                </button>
+            </div>
+
+            <div style="margin-top: 60px;">
+                <a href="index.html" style="color: #888; font-family: var(--font-mono); font-size: 0.8rem;">← RETOUR EN ZONE PUBLIQUE</a>
+            </div>
+
+        </section>
+
+    </div>
+    
+    <script src="assets/js/main.js"></script>
+    <style>
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</body>
+</html>
