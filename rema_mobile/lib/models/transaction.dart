@@ -1,49 +1,70 @@
 class RemaTransaction {
-  final String id;          // Correspond à transaction_uuid côté Python
-  final String senderPk;    // sender_pk
-  final String? receiverPk; // receiver_pk
-  final double amount;      // amount
-  final int timestamp;      // timestamp (BigInteger)
-  final String signature;   // signature
+  // --- [Doc Section 8.1] HEADER ---
+  final String uuid;          // Tx_UUID (Identifiant unique)
+  final int protocolVer;      // Version du protocole (Défaut: 1)
+
+  // --- [Doc Section 4.3] SÉCURITÉ ---
+  final String nonce;         // Nonce Cryptographique (Anti-Rejeu) - CRITIQUE
+  final int timestamp;        // Horodatage UTC (ms)
+
+  // --- [Doc Section 8.1] IDENTITÉ ---
+  final String senderPk;      // Hash ou Clé Publique de l'émetteur
+  final String? receiverPk;   // Hash ou Clé Publique du destinataire
+
+  // --- [Doc Section 8.1] VALEUR ---
+  final int amount;           // 🔥 INT OBLIGATOIRE (Unités atomiques). Pas de double.
+  final int currency;         // Code ISO 4217 (952 pour XOF)
+
+  // --- [Doc Section 4.1] PREUVE ---
+  final String signature;     // Signature Ed25519
+  final String? checksum;     // CRC32 pour intégrité rapide
 
   RemaTransaction({
-    required this.id,
+    required this.uuid,
+    this.protocolVer = 1,
+    required this.nonce,
     required this.senderPk,
-    this.receiverPk, 
+    this.receiverPk,
     required this.amount,
+    this.currency = 952,
     required this.timestamp,
     required this.signature,
+    this.checksum,
   });
 
-  // Pour lire ce qui vient du disque ou du réseau
+  // Factory : Création depuis JSON (Disque ou Réseau)
   factory RemaTransaction.fromJson(Map<String, dynamic> json) {
     return RemaTransaction(
-      id: json['transaction_uuid'] ?? json['id'] ?? '',
-      senderPk: json['sender_pk'] ?? '', 
+      uuid: json['uuid'] ?? json['transaction_uuid'] ?? '',
+      protocolVer: json['protocol_ver'] ?? 1,
+      nonce: json['nonce'] ?? '',
+      senderPk: json['sender_pk'] ?? '',
       receiverPk: json['receiver_pk'],
-      amount: (json['amount'] as num).toDouble(),
+      
+      // ⚠️ Conversion forcée en entier. Si on reçoit 100.0, on garde 100.
+      amount: (json['amount'] as num).toInt(),
+      
+      currency: json['currency'] ?? 952,
       timestamp: json['timestamp'] as int,
       signature: json['signature'] ?? '',
+      checksum: json['checksum'],
     );
   }
 
-  // Pour envoyer au Backend Python (Format SQLAlchemy strict)
+  // Serialisation : Envoi vers le Backend Python (Doit matcher TransactionItem)
   Map<String, dynamic> toJson() {
     return {
-      'transaction_uuid': id,   // ✅ Match exact avec transaction.py
-      'sender_pk': senderPk,    // ✅ Match exact
+      'uuid': uuid,
+      'protocol_ver': protocolVer,
+      'nonce': nonce,
+      'sender_pk': senderPk,
       if (receiverPk != null) 'receiver_pk': receiverPk,
-      'amount': amount,
+      'amount': amount,       // Envoie un int pur (ex: 500), pas 500.0
+      'currency': currency,
       'timestamp': timestamp,
       'signature': signature,
-      'type': 'OFFLINE_PAYMENT', // Valeur par défaut utile
-      'status': 'COMPLETED',
-      'is_offline_synced': true
+      if (checksum != null) 'checksum': checksum,
+      'type': 'OFFLINE_PAYMENT',
     };
-  }
-
-  // Pour la signature crypto (Le contenu exact à signer)
-  String toSignableString() {
-    return "$id|$senderPk|$amount|$timestamp";
   }
 }

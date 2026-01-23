@@ -2,31 +2,46 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 
-# --- 1. L'OBJET TRANSACTION (Tel qu'envoyé par le mobile) ---
+# --- 1. L'OBJET TRANSACTION (Conforme Doc Section 8.1) ---
 class TransactionItem(BaseModel):
-    id: str             # C'est l'UUID (nonce)
-    sender_pk: str
-    receiver_pk: Optional[str] = "" # Optionnel pour accepter le Hit & Run
-    amount: float
-    timestamp: int
-    type: str = "OFFLINE_PAYMENT"
-    signature: str
+    # [Doc] Identifiants & Version
+    uuid: str           # Tx_UUID (16 octets)
+    protocol_ver: int = 1 # Protocol_Ver (1 octet)
+    
+    # [Doc] Sécurité & Anti-Rejeu
+    nonce: str          # Nonce_Cryptographique (24 octets) - CRUCIAL
+    timestamp: int      # Timestamp_UTC (8 octets)
+    
+    # [Doc] Identité
+    sender_pk: str      # Clé publique pour vérification
+    receiver_pk: Optional[str] = "" 
+    
+    # [Doc] Valeur (Atomicité)
+    # 🔥 CRITIQUE : INT OBLIGATOIRE (Pas de Float). 
+    # 5000 FCFA = 5000. Si on gère les centimes, 500000.
+    amount: int         
+    currency: int = 952 # Code ISO 4217 (XOF)
+    
+    # [Doc] Preuve
+    signature: str      # Ed25519_Signature (64 octets)
+    checksum: Optional[str] = None # Integrity_Checksum
 
-# --- 2. LA RÉPONSE API (Celle qui manquait et causait l'erreur) ---
-# Utilisée quand l'API renvoie une transaction à l'écran
+    type: str = "OFFLINE_PAYMENT"
+
+# --- 2. LA RÉPONSE API ---
 class TransactionResponse(BaseModel):
     id: int
     transaction_uuid: str
     sender_pk: str
     receiver_pk: str
-    amount: float
+    amount: int         # <-- INT ICI AUSSI
     status: str
     synced_at: Optional[datetime]
     
     class Config:
-        from_attributes = True # Pour lire les objets SQLAlchemy
+        from_attributes = True 
 
-# --- 3. PAYLOAD SIGNÉ (Pour la rétro-compatibilité imports) ---
+# --- 3. PAYLOAD SIGNÉ ---
 class SignedPayload(BaseModel):
     payload: str
     signature: str
@@ -37,7 +52,4 @@ class TransactionBatchRequest(BaseModel):
     device_id: str
     count: int
     sync_timestamp: str
-    
-    # 🔥 CRITIQUE : On renomme 'payload' en 'transactions' 
-    # pour coller exactement à ton code Dart (rema_sync.dart)
     transactions: List[TransactionItem]
