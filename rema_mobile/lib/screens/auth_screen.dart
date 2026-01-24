@@ -23,7 +23,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isLoading = false;
   String _loadingText = "CONNEXION"; 
   
-  // ⚠️ Vérifie que c'est la bonne URL (Render ou locale)
+  // ⚠️ URL DE PROD (RENDER)
   static const String BASE_URL = "https://rema-backend-core.onrender.com"; 
   
   final Color kPrimaryColor = const Color(0xFFFF6600);
@@ -32,172 +32,148 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _registerAndLogin() async {
     if (_nameCtrl.text.isEmpty || _phoneCtrl.text.length < 4 || _pinCtrl.text.length < 4) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Remplissez tous les champs"), backgroundColor: Colors.red)
+        const SnackBar(content: Text("Remplissez tous les champs correctement")),
       );
       return;
     }
-    
-    setState(() => _isLoading = true);
-    
-    try {
-      // 1. GÉNÉRATION CLÉ HARDWARE (Locale)
-      setState(() => _loadingText = "Génération Identité Crypto...");
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      // On récupère la clé publique générée par le SecurityManager
-      String myPublicKey = await SecurityManager().getPublicKey();
-      
-      // 2. ENVOI AU SERVEUR (Inscription réelle)
-      setState(() => _loadingText = "Enregistrement Blockchain...");
-      
-      final dio = Dio(BaseOptions(baseUrl: BASE_URL, connectTimeout: const Duration(seconds: 10)));
-      
-      // --- CORRECTION ICI ---
-      // On génère un ID unique temporaire pour satisfaire le serveur
-      String uniqueDeviceId = "android_${DateTime.now().millisecondsSinceEpoch}";
 
+    setState(() { _isLoading = true; _loadingText = "SÉCURISATION..."; });
+
+    try {
+      // 1. Initialisation Sécurité
+      final sec = SecurityManager();
+      String pubKey = await sec.getPublicKey();
+      
+      // 🔥 CRITIQUE : HASH DU PIN (SHA-256)
+      // On utilise ta fonction security.dart pour ne jamais envoyer le PIN en clair
+      String pinHash = await sec.hashPin(_pinCtrl.text.trim());
+
+      Dio dio = Dio(BaseOptions(baseUrl: BASE_URL));
+      
+      // 2. Tentative d'inscription (Signup)
+      setState(() { _loadingText = "CRÉATION COMPTE..."; });
+      
       try {
         await dio.post("/auth/signup", data: {
-          // CORRECTION 1 : "phone" devient "phone_number" pour correspondre au serveur
-          "phone_number": _phoneCtrl.text,
-          
-          // CORRECTION 2 : Ajout du champ obligatoire "device_hardware_id"
-          "device_hardware_id": uniqueDeviceId,
-          
-          "pin_hash": _pinCtrl.text,
-          "full_name": _nameCtrl.text,
-          "public_key": myPublicKey,
-          "role": "user"
+          "phone_number": _phoneCtrl.text.trim(),
+          "full_name": _nameCtrl.text.trim(),
+          "pin_hash": pinHash, // On envoie le SHA-256
+          "public_key": pubKey,
+          "role": "user",
+          "device_hardware_id": "android_id_placeholder" 
         });
-      } on DioException catch (e) {
-        // Si erreur 400, c'est peut-être que l'user existe déjà.
-        if (e.response?.statusCode == 400) {
-           print("Utilisateur existe déjà, tentative de suite...");
-        } else {
-           rethrow; // Relance l'erreur pour le catch global
+      } catch (e) {
+        // Si erreur 400, c'est que le compte existe déjà, on continue vers le login
+        print("Info: Compte existant, passage au login.");
+      }
+
+      // 3. Connexion (Login)
+      setState(() { _loadingText = "AUTHENTIFICATION..."; });
+      
+      final loginResp = await dio.post(
+        "/auth/login",
+        data: {
+          "username": _phoneCtrl.text.trim(),
+          "password": pinHash // Le mot de passe est le Hash du PIN
+        },
+        options: Options(contentType: Headers.formUrlEncodedContentType)
+      );
+
+      if (loginResp.statusCode == 200) {
+        // 4. Sauvegarde Locale des identifiants
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_phone', _phoneCtrl.text.trim());
+        await prefs.setString('user_name', _nameCtrl.text.trim());
+        await prefs.setString('user_pin_hash', pinHash); // On garde le hash pour les reconnexions futures
+        await prefs.setString('auth_token', loginResp.data['access_token']);
+        
+        // Initialisation du solde offline à 0 pour les nouveaux utilisateurs
+        String vaultKey = 'vault_balance_v3_${_phoneCtrl.text.trim()}';
+        if (prefs.getInt(vaultKey) == null) {
+           await prefs.setInt(vaultKey, 0);
+        }
+
+        if (mounted) {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
         }
       }
 
-      // 3. SAUVEGARDE LOCALE
-      setState(() => _loadingText = "Finalisation...");
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user_name', _nameCtrl.text);
-      await prefs.setString('user_phone', _phoneCtrl.text);
-      // On sauvegarde aussi l'ID hardware généré
-      await prefs.setString('device_id', uniqueDeviceId);
-      
-      if (mounted) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
-      }
-
     } catch (e) {
-      setState(() => _isLoading = false);
-      String msg = "Erreur Connexion";
+      String msg = "Erreur de connexion";
       if (e is DioException) {
-         // Affiche le message d'erreur exact du serveur pour débugger
-         if (e.response != null) {
-           msg = "Refus Serveur (${e.response?.statusCode}): ${e.response?.data}";
-         } else {
-           msg = "Erreur Serveur: ${e.message}";
-         }
+        if (e.response?.statusCode == 403) msg = "PIN Incorrect";
+        else if (e.response?.statusCode == 404) msg = "Compte introuvable";
+        else msg = "Erreur réseau: ${e.message}";
       }
-      print("ERREUR COMPLÈTE: $e"); // Log console pour voir les détails
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red, duration: const Duration(seconds: 5))
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-
     return Scaffold(
-      backgroundColor: kBgColor,
-      body: Stack(
-        children: [
-          Positioned(top: -100, right: -100, child: CircleAvatar(radius: 150, backgroundColor: kPrimaryColor.withOpacity(0.05))),
-          Positioned(bottom: -50, left: -50, child: CircleAvatar(radius: 100, backgroundColor: kPrimaryColor.withOpacity(0.05))),
-
-          SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
+        backgroundColor: kBgColor,
+        body: Center(
+            child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 30),
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(15),
-                        decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.orange.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 10))]),
-                        child: Icon(Icons.nfc, size: 40, color: kPrimaryColor),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Center(child: Text("REMA PAY", style: GoogleFonts.spaceMono(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 2, color: Colors.black87))),
-                    Center(child: Text("Initialisation Système", style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey))),
-                    
-                    const SizedBox(height: 40),
-                    
-                    _buildLabel("Nom de l'utilisateur"),
-                    _buildInput(_nameCtrl, Icons.person_outline, "Votre Nom", false, TextInputType.name),
-                    
-                    const SizedBox(height: 20),
-                    
-                    _buildLabel("Identifiant Réseau (Tél)"),
-                    _buildInput(_phoneCtrl, Icons.phone_iphone, "07 XX XX XX XX", false, TextInputType.phone),
-                    
-                    const SizedBox(height: 20),
-                    
-                    _buildLabel("Clé PIN Locale"),
-                    _buildInput(_pinCtrl, Icons.lock_outline, "****", true, TextInputType.number),
-                    
-                    const SizedBox(height: 40),
-                    
-                    SizedBox(
-                      width: double.infinity,
-                      height: 60,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.black, 
-                          foregroundColor: Colors.white,
-                          elevation: 5,
-                          shadowColor: Colors.black.withOpacity(0.3),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                        // --- LOGO / TITRE ---
+                        Center(
+                          child: Text("REMA PAY", 
+                            style: GoogleFonts.ptMono(fontSize: 32, fontWeight: FontWeight.bold, color: kPrimaryColor)
+                          ),
                         ),
-                        onPressed: _isLoading ? null : _registerAndLogin,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            if (_isLoading) 
-                              Container(
-                                width: 20, height: 20, 
-                                margin: const EdgeInsets.only(right: 15),
-                                child: const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                        const SizedBox(height: 10),
+                        Center(
+                          child: Text("Banque Mobile Offline", 
+                            style: GoogleFonts.poppins(color: Colors.grey)
+                          ),
+                        ),
+                        const SizedBox(height: 50),
+
+                        // --- CHAMPS DE SAISIE ---
+                        _buildLabel("Nom complet"),
+                        _buildInput(_nameCtrl, Icons.person, "Ex: Moussa Diop", false, TextInputType.name),
+                        const SizedBox(height: 20),
+
+                        _buildLabel("Numéro de téléphone"),
+                        _buildInput(_phoneCtrl, Icons.phone, "Ex: 07080910", false, TextInputType.phone),
+                        const SizedBox(height: 20),
+
+                        _buildLabel("Code PIN Secret (4 chiffres)"),
+                        _buildInput(_pinCtrl, Icons.lock, "****", true, TextInputType.number),
+                        const SizedBox(height: 40),
+
+                        // --- BOUTON D'ACTION ---
+                        SizedBox(
+                          width: double.infinity,
+                          child: _isLoading 
+                          ? Column(children: [const CircularProgressIndicator(color: Colors.orange), const SizedBox(height: 10), Text(_loadingText)])
+                          : ElevatedButton(
+                              onPressed: _registerAndLogin,
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: kPrimaryColor,
+                                  padding: const EdgeInsets.symmetric(vertical: 18),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                                  elevation: 5,
+                                  shadowColor: kPrimaryColor.withOpacity(0.4)
                               ),
-                            Text(
-                              _isLoading ? _loadingText : "INITIALISER L'ACCÈS", 
-                              style: GoogleFonts.sourceCodePro(
-                                fontSize: _isLoading ? 12 : 16, 
-                                fontWeight: FontWeight.bold, 
-                                letterSpacing: 1
-                              )
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+                              child: Text("COMMENCER", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                          ),
+                        )
+                    ]
+                )
+            )
+        )
     );
   }
 
+  // --- WIDGETS DE STYLE ---
   Widget _buildLabel(String text) {
     return Padding(
       padding: const EdgeInsets.only(left: 10, bottom: 8),
@@ -208,14 +184,23 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget _buildInput(TextEditingController controller, IconData icon, String hint, bool isPassword, TextInputType type) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5))]),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(20), 
+        boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5))]
+      ),
       child: TextField(
         controller: controller,
         obscureText: isPassword,
         keyboardType: type,
         inputFormatters: isPassword ? [LengthLimitingTextInputFormatter(4), FilteringTextInputFormatter.digitsOnly] : [],
         style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold),
-        decoration: InputDecoration(border: InputBorder.none, hintText: hint, hintStyle: GoogleFonts.poppins(color: Colors.grey[300], fontSize: 14), icon: Icon(icon, color: kPrimaryColor, size: 22)),
+        decoration: InputDecoration(
+          border: InputBorder.none, 
+          hintText: hint, 
+          hintStyle: GoogleFonts.poppins(color: Colors.grey.shade400), 
+          icon: Icon(icon, color: Colors.grey)
+        ),
       ),
     );
   }

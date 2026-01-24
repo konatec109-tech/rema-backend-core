@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math'; // Nécessaire pour le Nonce
+import 'dart:math'; 
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:ble_peripheral/ble_peripheral.dart' as ble_server;
@@ -61,7 +61,6 @@ class RemaPay {
     final prefs = await SharedPreferences.getInstance();
     String currentPhone = prefs.getString('user_phone') ?? "Inconnu";
     
-    // Nom court BLE
     String safeName = "R:${currentPhone.replaceAll(RegExp(r'[^\w]'), '')}";
     if(safeName.length > 15) safeName = safeName.substring(0, 15);
 
@@ -111,28 +110,24 @@ class RemaPay {
     });
   }
 
-  // LOGIQUE DE VALIDATION CRYPTO (CONFORME DOC SECTION 8)
   static void _processSecurePayment(String msg) async {
       msg = msg.trim();
       if (!msg.startsWith("PAY:")) return;
 
       try {
-        // Format attendu: PAY:DATA_CONTENT:SIGNATURE
         List<String> parts = msg.split(":");
         if (parts.length < 3) return;
 
         String dataContent = parts[1]; 
         String signature = parts[2];
         
-        // [Doc Section 8.1] DÉCODAGE DU PAYLOAD STRUCTURÉ
-        // Format: UUID|NONCE|SENDER_PK|AMOUNT|TIMESTAMP|TARGET
         List<String> innerParts = dataContent.split("|");
         if (innerParts.length < 6) return;
 
-        String uuid = innerParts[0];          // [Doc] UUID
-        String nonce = innerParts[1];         // [Doc] NONCE (Anti-Rejeu)
-        String senderPk = innerParts[2];      // [Doc] PubKey
-        int amount = int.parse(innerParts[3]); // 🔥 INT (Atomic Unit) - CRITIQUE
+        String uuid = innerParts[0];          
+        String nonce = innerParts[1];         
+        String senderPk = innerParts[2];      
+        int amount = int.parse(innerParts[3]); 
         String timestampStr = innerParts[4];
         String targetNameInMsg = innerParts[5];
 
@@ -140,15 +135,13 @@ class RemaPay {
         String currentPhone = prefs.getString('user_phone') ?? "Inconnu";
         String myRawNumber = currentPhone.replaceAll(RegExp(r'[^\w]'), '');
         
-        // Vérification 1 : Ciblage (Est-ce bien pour moi ?)
         if (targetNameInMsg.replaceAll("R:", "").trim() != myRawNumber) return;
 
-        // Vérification 2 : Signature Ed25519 (Non-Répudiation)
         final sec = SecurityManager();
         if (await sec.verifySignature(dataContent, signature, senderPk)) {
           
           String balanceKey = 'vault_balance_v3_$currentPhone';
-          int current = prefs.getInt(balanceKey) ?? 0; // 🔥 Lecture en INT
+          int current = prefs.getInt(balanceKey) ?? 0;
           await prefs.setInt(balanceKey, current + amount);
           
           await _saveTransaction(
@@ -160,10 +153,10 @@ class RemaPay {
             type: "IN", 
             signature: signature, 
             senderPk: senderPk,
-            timestamp: int.parse(timestampStr)
+            timestamp: int.parse(timestampStr),
+            metadata: "{}" // Le receveur initialise metadata vide
           );
 
-          // Réponse ACK (Handshake complet)
           try {
              await ble_server.BlePeripheral.updateCharacteristic(
                  characteristicId: CHAR_UUID,
@@ -178,7 +171,7 @@ class RemaPay {
   }
 
   // ===========================================================================
-  // 3. PAYER (CLIENT - AVEC NONCE & UUID)
+  // 3. PAYER (CLIENT)
   // ===========================================================================
   static Future<void> scanForMerchants({required Function(String, String) onFound}) async {
     await stopAll();
@@ -191,12 +184,12 @@ class RemaPay {
     });
   }
 
-  // 🔥 CHANGEMENT MAJEUR : amount est un INT (Conforme Section 8.1)
-  static Future<void> payTarget(String merchantId, String targetName, int amount) async {
+  // 🔥 AJOUT: paramètre metadata optionnel pour Visa/FedaPay
+  static Future<void> payTarget(String merchantId, String targetName, int amount, {String metadata = "{}"}) async {
     final prefs = await SharedPreferences.getInstance();
     String myPhone = prefs.getString('user_phone') ?? "Inconnu";
     String balanceKey = 'vault_balance_v3_$myPhone';
-    int currentBalance = prefs.getInt(balanceKey) ?? 0; // 🔥 Lecture INT
+    int currentBalance = prefs.getInt(balanceKey) ?? 0; 
 
     if (currentBalance < amount) {
         onStatusUpdate?.call("❌ SOLDE INSUFFISANT");
@@ -248,16 +241,13 @@ class RemaPay {
         final String myPk = await sec.getPublicKey();
         final int timestamp = DateTime.now().millisecondsSinceEpoch;
         
-        // --- [Doc Section 4.3] GÉNÉRATION UUID & NONCE ---
         final String uuid = "${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(9999)}";
-        final String nonce = _generateNonce(24); // 24 chars aléatoires
+        final String nonce = _generateNonce(24); 
         
-        // --- [Doc Section 8.1] PAYLOAD STRUCTURÉ (Le contrat binaire) ---
-        // Format: UUID|NONCE|SENDER_PK|AMOUNT|TIMESTAMP|TARGET
         final String contract = "$uuid|$nonce|$myPk|$amount|$timestamp|$targetName";
         
         final String signature = await sec.sign(contract);
-        String payload = "PAY:$contract:$signature#"; // Encapsulation Rema Frame
+        String payload = "PAY:$contract:$signature#"; 
         
         await _sendInChunks(targetChar, payload);
         
@@ -265,9 +255,9 @@ class RemaPay {
         try {
           await ackCompleter.future.timeout(const Duration(seconds: 10));
           
-          // SUCCÈS : Débit Atomique Local
-          await prefs.setInt(balanceKey, currentBalance - amount); // 🔥 INT
+          await prefs.setInt(balanceKey, currentBalance - amount); 
           
+          // 🔥 SAUVEGARDE AVEC METADATA
           await _saveTransaction(
               uuid: uuid,
               nonce: nonce,
@@ -277,7 +267,8 @@ class RemaPay {
               type: "OUT", 
               signature: signature, 
               senderPk: myPk, 
-              timestamp: timestamp
+              timestamp: timestamp,
+              metadata: metadata // <--- ICI ON PASSE L'ARGUMENT
           );
           onStatusUpdate?.call("✅ PAIEMENT RÉUSSI !");
           
@@ -296,7 +287,6 @@ class RemaPay {
     }
   }
 
-  // --- OUTILS TECHNIQUES ---
   static Future<void> _sendInChunks(BluetoothCharacteristic c, String payload) async {
     int chunkSize = 20; 
     List<int> bytes = utf8.encode(payload);
@@ -314,34 +304,35 @@ class RemaPay {
       length, (_) => chars.codeUnitAt(rnd.nextInt(chars.length))));
   }
 
-  // --- DATA & STOCKAGE (Conforme Transaction.dart) ---
+  // 🔥 MODIFICATION ICI : AJOUT DE METADATA DANS LA SAUVEGARDE
   static Future<void> _saveTransaction({
     required String uuid,
     required String nonce,
     required String phone, 
-    required int amount, // 🔥 INT
+    required int amount, 
     required String partner, 
     required String type, 
     required String signature, 
     String? senderPk, 
-    int? timestamp
+    int? timestamp,
+    String? metadata // <--- NOUVEAU PARAMÈTRE
   }) async {
     final prefs = await SharedPreferences.getInstance();
     String key = 'history_v3_$phone'; 
     List<String> history = prefs.getStringList(key) ?? [];
     
-    // Structure JSON alignée avec transaction.dart
     Map<String, dynamic> tx = {
-      "uuid": uuid, // [Doc] UUID v4
-      "nonce": nonce, // [Doc] Anti-Rejeu
-      "amount": amount, // [Doc] Atomic Unit
+      "uuid": uuid, 
+      "nonce": nonce, 
+      "amount": amount, 
       "currency": 952,
       "partner": partner, 
       "type": type, 
       "signature": signature,
       "sender_pk": senderPk ?? "", 
       "timestamp": timestamp ?? DateTime.now().millisecondsSinceEpoch, 
-      "protocol_ver": 1
+      "protocol_ver": 1,
+      "metadata": metadata ?? "{}" // 🔥 ON LE SAUVEGARDE ENFIN
     };
     
     history.insert(0, jsonEncode(tx));
@@ -356,7 +347,7 @@ class RemaPay {
     return h.map((e) => jsonDecode(e) as Map<String, dynamic>).toList();
   }
 
-  static Future<int> getOfflineBalance() async { // 🔥 Retourne INT
+  static Future<int> getOfflineBalance() async { 
     final p = await SharedPreferences.getInstance();
     String phone = p.getString('user_phone') ?? "Inconnu";
     return p.getInt('vault_balance_v3_$phone') ?? 0;

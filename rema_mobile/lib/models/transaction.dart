@@ -1,23 +1,26 @@
 class RemaTransaction {
   // --- [Doc Section 8.1] HEADER ---
-  final String uuid;          // Tx_UUID (Identifiant unique)
-  final int protocolVer;      // Version du protocole (Défaut: 1)
+  final String uuid;          
+  final int protocolVer;      
 
   // --- [Doc Section 4.3] SÉCURITÉ ---
-  final String nonce;         // Nonce Cryptographique (Anti-Rejeu) - CRITIQUE
-  final int timestamp;        // Horodatage UTC (ms)
+  final String nonce;         
+  final int timestamp;        
 
   // --- [Doc Section 8.1] IDENTITÉ ---
-  final String senderPk;      // Hash ou Clé Publique de l'émetteur
-  final String? receiverPk;   // Hash ou Clé Publique du destinataire
+  final String senderPk;      
+  final String? receiverPk;   
 
   // --- [Doc Section 8.1] VALEUR ---
-  final int amount;           // 🔥 INT OBLIGATOIRE (Unités atomiques). Pas de double.
-  final int currency;         // Code ISO 4217 (952 pour XOF)
+  final int amount;           // 🔥 INT OBLIGATOIRE
+  final int currency;         
 
   // --- [Doc Section 4.1] PREUVE ---
-  final String signature;     // Signature Ed25519
-  final String? checksum;     // CRC32 pour intégrité rapide
+  final String signature;     
+  final String? checksum;     
+  
+  // 🔥 AJOUT B2B (VISA / FEDAPAY)
+  final String metadata;
 
   RemaTransaction({
     required this.uuid,
@@ -30,6 +33,7 @@ class RemaTransaction {
     required this.timestamp,
     required this.signature,
     this.checksum,
+    this.metadata = "{}" // Par défaut vide
   });
 
   // Factory : Création depuis JSON (Disque ou Réseau)
@@ -41,30 +45,30 @@ class RemaTransaction {
       senderPk: json['sender_pk'] ?? '',
       receiverPk: json['receiver_pk'],
       
-      // ⚠️ Conversion forcée en entier. Si on reçoit 100.0, on garde 100.
       amount: (json['amount'] as num).toInt(),
       
       currency: json['currency'] ?? 952,
       timestamp: json['timestamp'] as int,
       signature: json['signature'] ?? '',
       checksum: json['checksum'],
+      metadata: json['metadata'] ?? "{}" // ✅ On récupère la métadonnée
     );
   }
 
-  // Serialisation : Envoi vers le Backend Python (Doit matcher TransactionItem)
+  // Serialisation : Envoi vers le Backend Python
   Map<String, dynamic> toJson() {
     return {
       'uuid': uuid,
       'protocol_ver': protocolVer,
       'nonce': nonce,
       'sender_pk': senderPk,
-      if (receiverPk != null) 'receiver_pk': receiverPk,
-      'amount': amount,       // Envoie un int pur (ex: 500), pas 500.0
+      'receiver_pk': receiverPk,
+      'amount': amount,
       'currency': currency,
-      'timestamp': timestamp,
       'signature': signature,
-      if (checksum != null) 'checksum': checksum,
+      'timestamp': timestamp,
       'type': 'OFFLINE_PAYMENT',
+      'metadata': metadata // ✅ On l'envoie
     };
   }
 }

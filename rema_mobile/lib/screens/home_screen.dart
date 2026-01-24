@@ -18,503 +18,424 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _myPhone = "...";
-  double _balance = 0.0; // OFFLINE
-  double _onlineBalance = 0.0; // ONLINE (Cloud)
+  
+  // 🔥 VARIABLES D'ÉTAT (ENTIERS POUR ÉVITER LES ERREURS DE CENTIMES)
+  int _balance = 0;       // Solde Offline (Dans votre poche)
+  int _onlineBalance = 0; // Solde Online (Dans la Banque)
   
   bool _isReceiving = false;    
-  List<Map<String, dynamic>> _history = [];
+  List<Map<String, dynamic>> _history = []; // Historique complet
   Timer? _balanceTimer;
+
+  // Formatage des sommes : 10000 -> "10 000"
+  final currencyFmt = NumberFormat("#,###", "fr_FR");
 
   @override
   void initState() {
     super.initState();
     
-    // 👇 AJOUT CRITIQUE ICI 👇
-    // Lance le moteur Bluetooth et demande les permissions au démarrage
+    // 1. Initialisation du moteur Bluetooth
     RemaPay.init(); 
     
+    // 2. Chargement immédiat des données locales
     _loadData();
     
-    // Timer Cloud (Toutes les 10s)
+    // 3. Récupération du solde Banque (Immédiat + Timer 10s)
+    _fetchCloudBalance(); 
     _balanceTimer = Timer.periodic(const Duration(seconds: 10), (t) => _fetchCloudBalance());
     
-    // Écouteur Transaction
-    RemaPay.onTransactionReceived = (tx) {
-      _loadData(); 
-      if(mounted) {
-         // Gestion robuste du type (int ou double)
-         double amount = (tx['amount'] is int) ? (tx['amount'] as int).toDouble() : (tx['amount'] as double);
-         String sender = tx['phone'] ?? "Inconnu";
-         _showSuccessPopup(amount, "Reçu de $sender");
-      }
+    // 4. Écouteurs d'événements (Pour mettre à jour l'UI en temps réel)
+    
+    // A. Messages de statut (Toast/Snackbars)
+    RemaPay.onStatusUpdate = (msg) {
+        if(mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(msg), 
+            duration: const Duration(milliseconds: 1500),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+        // Si le système dit "Standby", on désactive le mode réception visuel
+        if (msg.contains("Standby") && _isReceiving) {
+             setState(() => _isReceiving = false);
+        }
     };
     
-    // Écouteur Status
-    RemaPay.onStatusUpdate = (msg) {
-      if (mounted && msg.contains("Invisible")) {
-        setState(() => _isReceiving = false);
-      }
+    // B. Réception d'argent (Mise à jour automatique)
+    RemaPay.onTransactionReceived = (data) {
+        _loadData(); // On recharge le solde et l'historique
     };
   }
-  
+
   @override
   void dispose() {
     _balanceTimer?.cancel();
+    RemaPay.stopAll();
     super.dispose();
   }
 
+  // --- CHARGEMENT DES DONNÉES LOCALES (OFFLINE) ---
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
+    int offBal = await RemaPay.getOfflineBalance();
+    var hist = await RemaPay.getHistory();
     
-    // CORRECTION 1 : Conversion explicite en double
-    double v = (await RemaPay.getOfflineBalance()).toDouble();
-    
-    List<Map<String, dynamic>> h = await RemaPay.getHistory();
-    _fetchCloudBalance(); // Appel immédiat au cloud
-
-    if(mounted) {
+    if (mounted) {
       setState(() {
         _myPhone = prefs.getString('user_phone') ?? "Inconnu";
-        _balance = v;
-        _history = h;
+        _balance = offBal;
+        _history = hist;
       });
     }
   }
-  
+
+  // --- CHARGEMENT DES DONNÉES ONLINE (BANQUE) ---
   Future<void> _fetchCloudBalance() async {
-    final api = ApiService();
-    // CORRECTION 2 : Gestion du null et conversion en double
-    var bal = await api.fetchUserBalance();
-    double? online = bal?.toDouble();
-
-    if(online != null && mounted) {
-      setState(() => _onlineBalance = online);
+    // Appelle l'API pour savoir combien il reste sur le compte bancaire
+    int? bal = await ApiService().fetchUserBalance();
+    if (bal != null && mounted) {
+      setState(() => _onlineBalance = bal);
     }
   }
 
-  // --- ACTIONS ---
-
-  void _toggleReceive() async {
-    setState(() => _isReceiving = !_isReceiving);
-    if (_isReceiving) {
-      await RemaPay.startReceiving(); 
-    } else {
-      await RemaPay.stopAll(); 
-    }
-  }
-
-  // LE SCAN (Pop-up comme avant)
-  void _startScan() {
-    showDialog(
-      context: context, 
-      barrierDismissible: true,
-      builder: (ctx) => _RadarDialog(
-        onSelected: (id, name) {
-          Navigator.pop(ctx); 
-          // Une fois le destinataire choisi, on demande le montant
-          _showAmountDialog(id, name);
-        },
-      )
-    );
-  }
-  
-  // SYNC (Nouveau bouton pour envoyer au cloud)
-  void _startSync() async {
+  // --- SYNCHRONISATION (TÉLÉPHONE <-> BANQUE) ---
+  Future<void> _handleSync() async {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Synchronisation en cours...")));
-    final api = ApiService();
-    final res = await api.syncTransactions();
-    if(res['status'] != 'error') {
-       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Synchronisé avec la Banque !"), backgroundColor: Colors.green));
-       _fetchCloudBalance(); // Mise à jour solde
-    } else {
-       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: ${res['message']}"), backgroundColor: Colors.red));
-    }
-  }
-
-  void _showAmountDialog(String deviceId, String deviceName) {
-    TextEditingController amountCtrl = TextEditingController();
-    showDialog(
-      context: context, 
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text("Payer $deviceName", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: amountCtrl, 
-          keyboardType: TextInputType.number, 
-          autofocus: true, 
-          decoration: InputDecoration(
-            suffixText: "FCFA", 
-            hintText: "Montant",
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(15))
-          )
-        ),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black, 
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
-              ),
-              onPressed: () {
-                  double? amount = double.tryParse(amountCtrl.text);
-                  if (amount != null && amount > 0) {
-                    Navigator.pop(ctx);
-                    _doPayment(deviceId, deviceName, amount);
-                  }
-              },
-              child: const Text("CONFIRMER LE PAIEMENT"),
-            ),
-          )
-        ],
-      )
-    );
-  }
-
-  Future<void> _doPayment(String id, String name, double amount) async {
-    // Petit loader
-    showDialog(barrierDismissible: false, context: context, builder: (_) => const Center(child: CircularProgressIndicator(color: Colors.orange)));
-    try {
-      // CORRECTION 3 : Conversion en entier pour l'envoi
-      await RemaPay.payTarget(id, name, amount.toInt());
+    
+    // Envoi des preuves de paiement au serveur
+    var res = await ApiService().syncTransactions();
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      bool success = res['status'] == 'success' || res['status'] == 'empty';
       
-      if (mounted) Navigator.pop(context); 
-      _loadData(); 
-      _showSuccessPopup(amount, "Envoyé avec succès !");
-    } catch (e) {
-      if (mounted) Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: Colors.red, content: Text("Erreur: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(success ? "✅ Cloud à jour" : "⚠️ ${res['message']}"),
+        backgroundColor: success ? Colors.green : Colors.orange,
+      ));
+      
+      // Une fois sync, on met à jour le solde Online pour refléter la réalité
+      if (success) _fetchCloudBalance(); 
     }
   }
 
-  void _showSuccessPopup(dynamic amount, String title) {
-    showDialog(context: context, builder: (ctx) => Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.check_circle, color: Color(0xFF00CC66), size: 60),
-            const SizedBox(height: 10),
-            Text(title, textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 5),
-            Text("${amount} FCFA", style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text("Fermer")),
+  // --- DIALOGUE DE RECHARGE (BANQUE -> TÉLÉPHONE) ---
+  void _showRechargeDialog() {
+    final c = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text("Retrait Banque", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text("Transférer du solde Online vers votre coffre Offline.", style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 10),
+          TextField(
+            controller: c, 
+            keyboardType: TextInputType.number, 
+            decoration: const InputDecoration(
+              labelText: "Montant (FCFA)", 
+              border: OutlineInputBorder(),
+              suffixText: "FCFA"
             )
-          ],
-        ),
+          ),
+          const SizedBox(height: 10),
+          // Indicateur visuel du solde disponible
+          Text("Dispo Online: ${currencyFmt.format(_onlineBalance)} F", style: const TextStyle(fontSize: 12, color: Colors.green))
+        ],
       ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ANNULER")),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+          onPressed: () async {
+            int amount = int.tryParse(c.text) ?? 0;
+            if (amount > 0) {
+                // 1. Vérification locale avant appel
+                if (amount > _onlineBalance) {
+                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Solde bancaire insuffisant")));
+                   return;
+                }
+                Navigator.pop(ctx);
+                
+                // 2. Appel API
+                // Si succès : Online baisse, Offline monte
+                bool ok = await ApiService().rechargeOfflineVault(amount);
+                
+                if(ok) {
+                    _loadData(); // Met à jour le Offline (Monte ⬆️)
+                    _fetchCloudBalance(); // Met à jour le Online (Baisse ⬇️)
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Argent téléchargé dans le téléphone !")));
+                } else {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("❌ Erreur connexion banque")));
+                }
+            }
+        }, child: const Text("VALIDER"))
+      ],
     ));
+  }
+
+  // --- DIALOGUE DE PAIEMENT (ENVOI D'ARGENT) ---
+  void _showPaymentDialog(String id, String name) {
+      final ctrl = TextEditingController();
+      showDialog(context: context, builder: (ctx) => AlertDialog(
+          title: Text("Payer $name", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          content: TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: "Montant", suffixText: "FCFA", border: OutlineInputBorder())
+          ),
+          actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("ANNULER")),
+              ElevatedButton(
+                  onPressed: () {
+                      int amount = int.tryParse(ctrl.text) ?? 0;
+                      if (amount > 0) {
+                          Navigator.pop(ctx);
+                          // 🔥 PAIEMENT OFFLINE SÉCURISÉ (VISA COMPATIBLE)
+                          RemaPay.payTarget(id, name, amount, metadata: "{\"source\": \"app_v3\"}")
+                                 .then((_) => _loadData()) // Le solde Offline Baisse ⬇️ immédiatement
+                                 .catchError((e) {
+                                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e"), backgroundColor: Colors.red));
+                                 });
+                      }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6600), foregroundColor: Colors.white),
+                  child: const Text("PAYER")
+              )
+          ],
+      ));
+  }
+
+  // --- DIALOGUE DE SCAN (RECHERCHE MARCHANDS) ---
+  void _showScanDialog() {
+      Map<String, String> devicesFound = {};
+      
+      showDialog(context: context, builder: (ctx) {
+          // Lancement du scan Bluetooth
+          RemaPay.scanForMerchants(onFound: (id, name) {
+              if (ctx.mounted && !devicesFound.containsKey(id)) {
+                  // Rafraîchissement dynamique de la liste
+                  (ctx as Element).markNeedsBuild();
+                  devicesFound[id] = name;
+              }
+          });
+
+          return StatefulBuilder(
+              builder: (context, setState) {
+                return AlertDialog(
+                    title: const Text("Recherche REMA..."),
+                    content: SizedBox(
+                        height: 300,
+                        width: double.maxFinite,
+                        child: Column(
+                            children: [
+                                const LinearProgressIndicator(color: Color(0xFFFF6600)),
+                                const SizedBox(height: 20),
+                                Expanded(
+                                    child: devicesFound.isEmpty 
+                                    ? Center(child: Text("Approchez un téléphone...", style: GoogleFonts.poppins(color: Colors.grey)))
+                                    : ListView.builder(
+                                        itemCount: devicesFound.length,
+                                        itemBuilder: (c, i) {
+                                            String id = devicesFound.keys.elementAt(i);
+                                            String name = devicesFound.values.elementAt(i);
+                                            return ListTile(
+                                                leading: const Icon(Icons.phone_iphone),
+                                                title: Text(name, style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                                                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                                                onTap: () {
+                                                    Navigator.pop(ctx); // On ferme le scan
+                                                    _showPaymentDialog(id, name); // On ouvre le paiement
+                                                },
+                                            );
+                                        }
+                                    )
+                                )
+                            ]
+                        )
+                    ),
+                    actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("FERMER"))
+                    ],
+                );
+              }
+          );
+      }).then((_) => RemaPay.stopAll()); // Arrêt du scan à la fermeture
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA), 
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Bonjour,", style: GoogleFonts.poppins(color: Colors.grey, fontSize: 14)),
-            Text(_myPhone, style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 20)),
-          ],
+        backgroundColor: const Color(0xFFF4F6F9),
+        
+        // --- BARRE DU HAUT ---
+        appBar: AppBar(
+            backgroundColor: Colors.white,
+            elevation: 0,
+            title: Text("REMA PAY", style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold, letterSpacing: 1)),
+            centerTitle: true,
+            actions: [
+                // Bouton Sync
+                IconButton(icon: const Icon(Icons.cloud_sync, color: Colors.black), onPressed: _handleSync),
+                // Bouton Déconnexion
+                IconButton(icon: const Icon(Icons.logout, color: Colors.redAccent), onPressed: () async {
+                    final p = await SharedPreferences.getInstance();
+                    await p.clear();
+                    if(mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen()));
+                })
+            ],
         ),
-        actions: [
-          // Bouton Sync (Nuage)
-          IconButton(
-            icon: const Icon(Icons.cloud_upload, color: Colors.blue),
-            onPressed: _startSync,
-          ),
-          IconButton(
-            icon: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.logout, color: Colors.red, size: 20)
-            ), 
-            onPressed: () async {
-               final p = await SharedPreferences.getInstance(); p.clear();
-               await RemaPay.stopAll();
-               Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthScreen()));
-            }
-          )
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            
-            // --- CARTE ORANGE DÉGRADÉE ---
-            Container(
-              height: 200,
-              padding: const EdgeInsets.all(25),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(30),
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFFF8C42), Color(0xFFFF5F2E)], 
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: [
-                  BoxShadow(color: const Color(0xFFFF5F2E).withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 10))
-                ]
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text("REMA WALLET", style: GoogleFonts.ptMono(color: Colors.white70, letterSpacing: 1.5)),
-                      // Affichage du Solde Cloud en petit
-                      Row(
-                         children: [
-                           const Icon(Icons.cloud, color: Colors.white54, size: 14),
-                           const SizedBox(width: 5),
-                           Text("${_onlineBalance.toStringAsFixed(0)} F", style: GoogleFonts.poppins(color: Colors.white54, fontSize: 12)),
-                         ],
-                      )
-                    ],
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("Solde Poche (Offline)", style: GoogleFonts.poppins(color: Colors.white70)),
-                      const SizedBox(height: 5),
-                      Text("${_balance.toStringAsFixed(0)} FCFA", style: GoogleFonts.poppins(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text("**** 8842", style: GoogleFonts.poppins(color: Colors.white70, fontSize: 16)),
-                      InkWell(
-                        onTap: () { 
-                          // Simule une recharge offline depuis le cloud
-                          final api = ApiService();
-                          api.rechargeOfflineVault(5000).then((v) { _loadData(); });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                          decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-                          child: const Text("+ Recharge", style: TextStyle(color: Colors.white)),
-                        ),
-                      )
-                    ],
-                  )
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 30),
-
-            // --- BOUTONS D'ACTION ---
-            Row(
-              children: [
-                // RECEVOIR
-                Expanded(
-                  child: InkWell(
-                    onTap: _toggleReceive,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: _isReceiving ? const Color(0xFF4CD964) : Colors.white, 
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: _isReceiving 
-                          ? [BoxShadow(color: const Color(0xFF4CD964).withOpacity(0.4), blurRadius: 15, offset: const Offset(0, 5))]
-                          : [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10)]
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.podcasts, color: _isReceiving ? Colors.white : const Color(0xFF4CD964), size: 28),
-                          const SizedBox(height: 5),
-                          Text(_isReceiving ? "En attente..." : "Recevoir", style: GoogleFonts.poppins(color: _isReceiving ? Colors.white : Colors.black, fontWeight: FontWeight.bold))
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 20),
-                // PAYER
-                Expanded(
-                  child: InkWell(
-                    onTap: _startScan,
-                    child: Container(
-                      height: 80,
-                      decoration: BoxDecoration(
+        
+        body: Column(
+            children: [
+                // --- CARTE PRINCIPALE (SOLDE) ---
+                Container(
+                    margin: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(25),
+                    decoration: BoxDecoration(
                         color: Colors.black, 
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 5))]
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.send_rounded, color: Colors.white, size: 28),
-                          const SizedBox(height: 5),
-                          Text("Payer", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold))
-                        ],
-                      ),
+                        borderRadius: BorderRadius.circular(25),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10))]
                     ),
+                    child: Column(children: [
+                        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                             const Text("SOLDE OFFLINE", style: TextStyle(color: Colors.white54, fontSize: 12)),
+                             Container(
+                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                 decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
+                                 child: const Row(children: [Icon(Icons.flash_on, color: Colors.yellow, size: 14), SizedBox(width: 4), Text("Instantané", style: TextStyle(color: Colors.white, fontSize: 10))])
+                             )
+                        ]),
+                        const SizedBox(height: 10),
+                        
+                        // 🔥 Affichage du Solde Offline (En Gros)
+                        Text("${currencyFmt.format(_balance)} F", style: GoogleFonts.poppins(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
+                        
+                        const Divider(color: Colors.white24, height: 30),
+                        
+                        // Ligne du bas : Solde Banque + Bouton Retrait
+                        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text("BANQUE (CLOUD)", style: TextStyle(color: Colors.white54, fontSize: 10)),
+                                Text("${currencyFmt.format(_onlineBalance)} F", style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold))
+                            ]),
+                            ElevatedButton.icon(
+                                onPressed: _showRechargeDialog, 
+                                icon: const Icon(Icons.download, size: 16), 
+                                label: const Text("Retrait"),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5))
+                            )
+                        ])
+                    ])
+                ),
+
+                // --- TITRE HISTORIQUE ---
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 25),
+                  child: Row(
+                    children: [
+                      Text("Activités récentes", style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
+                    ],
                   ),
                 ),
-              ],
-            ),
-
-            const SizedBox(height: 30),
-            Text("Transactions Récentes", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 18)),
-            const SizedBox(height: 15),
-
-            // --- HISTORIQUE ---
-            _history.isEmpty 
-             ? const Center(child: Padding(padding: EdgeInsets.all(20), child: Text("Aucune transaction")))
-             : ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _history.length,
-                itemBuilder: (ctx, i) {
-                  final tx = _history[i];
-                  bool isReceived = tx['type'] == "IN";
-                  // Date Parsing
-                  String dateStr = tx['date'] ?? "";
-                  if(dateStr.length > 16) dateStr = dateStr.substring(11, 16);
-
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 15),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25)),
-                    child: Theme(
-                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        tilePadding: const EdgeInsets.all(10),
-                        leading: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: isReceived ? const Color(0xFFE8F5E9) : Colors.grey.shade100, 
-                            shape: BoxShape.circle
-                          ),
-                          child: Icon(
-                            isReceived ? Icons.south_west : Icons.north_east, 
-                            color: isReceived ? const Color(0xFF4CD964) : Colors.black, 
-                            size: 20
-                          ),
-                        ),
-                        title: Text(tx['partner'], style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)),
-                        subtitle: Text(dateStr, style: GoogleFonts.poppins(color: Colors.grey, fontSize: 12)),
-                        trailing: Text(
-                          "${isReceived ? '+' : '-'} ${tx['amount'].toInt()}", 
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold, 
-                            fontSize: 18, 
-                            color: Colors.black 
-                          )
-                        ),
-                        children: [
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(15),
-                            margin: const EdgeInsets.fromLTRB(15, 0, 15, 15),
-                            decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(15)),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.verified_user, size: 16, color: Colors.blue),
-                                    const SizedBox(width: 5),
-                                    Text("PREUVE SÉCURISÉE", style: GoogleFonts.poppins(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 10)),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  tx['signature'] ?? "Erreur de signature", 
-                                  style: GoogleFonts.robotoMono(fontSize: 10, color: Colors.grey.shade700),
-                                ),
-                              ],
-                            ),
-                          )
-                        ],
-                      ),
-                    ),
-                  );
-                },
-             ),
-          ],
+                
+                // --- LISTE DE L'HISTORIQUE ---
+                Expanded(
+                    child: _history.isEmpty 
+                    ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(Icons.history, size: 50, color: Colors.grey.shade300),
+                        const SizedBox(height: 10),
+                        Text("Aucune transaction", style: GoogleFonts.poppins(color: Colors.grey))
+                      ]))
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(20),
+                        itemCount: _history.length,
+                        separatorBuilder: (_,__) => const SizedBox(height: 10),
+                        itemBuilder: (ctx, i) {
+                            var tx = _history[i];
+                            // Détermine si c'est Entrant (IN) ou Sortant (OUT)
+                            bool isOut = tx['type'] == 'OUT';
+                            DateTime date = DateTime.fromMillisecondsSinceEpoch(tx['timestamp']);
+                            
+                            return Container(
+                                padding: const EdgeInsets.all(15),
+                                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
+                                child: Row(children: [
+                                    // Icône (Flèche rouge ou verte)
+                                    Container(
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(color: isOut ? Colors.orange.shade50 : Colors.green.shade50, borderRadius: BorderRadius.circular(12)),
+                                        child: Icon(isOut ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, color: isOut ? Colors.orange : Colors.green)
+                                    ),
+                                    const SizedBox(width: 15),
+                                    // Détails (Nom + Date)
+                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                        Text(isOut ? "Payé à ${tx['partner']}" : "Reçu de ${tx['partner'] ?? 'Inconnu'}", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                                        Text(DateFormat('dd MMM à HH:mm', 'fr_FR').format(date), style: const TextStyle(color: Colors.grey, fontSize: 12))
+                                    ])),
+                                    // Montant (+ ou -)
+                                    Text("${isOut ? '-' : '+'}${currencyFmt.format(tx['amount'])} F", 
+                                        style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, color: isOut ? Colors.black : Colors.green)
+                                    )
+                                ])
+                            );
+                        }
+                    )
+                )
+            ]
         ),
-      ),
-    );
-  }
-}
-
-// --- SCANNER RADAR ---
-class _RadarDialog extends StatefulWidget {
-  final Function(String, String) onSelected;
-  const _RadarDialog({required this.onSelected});
-  @override
-  State<_RadarDialog> createState() => _RadarDialogState();
-}
-
-class _RadarDialogState extends State<_RadarDialog> {
-  final Map<String, String> _devices = {};
-  Timer? _cleanupTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    // Scan
-    RemaPay.scanForMerchants(onFound: (id, name) { 
-      if(mounted) setState(() => _devices[id] = name); 
-    });
-
-    // Nettoyage
-    _cleanupTimer = Timer.periodic(const Duration(seconds: 3), (t) {
-       if (mounted) setState(() => _devices.clear());
-    });
-  }
-
-  @override
-  void dispose() {
-    _cleanupTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-      child: Container(
-        height: 400,
-        padding: const EdgeInsets.all(25),
-        child: Column(children: [
-            const CircularProgressIndicator(color: Colors.black),
-            const SizedBox(height: 15),
-            Text("Recherche REMA...", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            Expanded(child: _devices.isEmpty 
-              ? Center(child: Text("Approchez un téléphone...", style: GoogleFonts.poppins(color: Colors.grey)))
-              : ListView.builder(itemCount: _devices.length, itemBuilder: (ctx, i) {
-                    String id = _devices.keys.elementAt(i);
-                    String name = _devices.values.elementAt(i);
-                    return ListTile(
-                      leading: const Icon(Icons.phone_iphone, color: Colors.black), 
-                      title: Text(name, style: GoogleFonts.poppins(fontWeight: FontWeight.bold)), 
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                      onTap: () => widget.onSelected(id, name)
-                    );
-            })),
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER", style: TextStyle(color: Colors.red)))
-        ]),
-      ),
+        
+        // --- BOUTONS D'ACTION (BAS DE PAGE) ---
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+        floatingActionButton: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                    // --- BOUTON RECEVOIR ---
+                    Expanded(
+                        child: FloatingActionButton.extended(
+                            heroTag: "btnRec",
+                            onPressed: () {
+                                setState(() => _isReceiving = true);
+                                RemaPay.startReceiving();
+                                showDialog(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(
+                                    content: Column(mainAxisSize: MainAxisSize.min, children: [
+                                        const SizedBox(height: 10),
+                                        const CircularProgressIndicator(color: Colors.black),
+                                        const SizedBox(height: 20),
+                                        Text("Mode Marchand Activé", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                                        const Text("En attente d'un client...", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                        const SizedBox(height: 20),
+                                        TextButton(onPressed: () {
+                                            RemaPay.stopAll();
+                                            Navigator.pop(ctx);
+                                        }, child: const Text("ARRÊTER", style: TextStyle(color: Colors.red)))
+                                    ])
+                                )).then((_) => setState(() => _isReceiving = false));
+                            },
+                            backgroundColor: Colors.black,
+                            icon: const Icon(Icons.qr_code_scanner),
+                            label: const Text("RECEVOIR")
+                        )
+                    ),
+                    const SizedBox(width: 15),
+                    
+                    // --- BOUTON PAYER ---
+                    Expanded(
+                        child: FloatingActionButton.extended(
+                            heroTag: "btnPay",
+                            onPressed: _showScanDialog,
+                            backgroundColor: const Color(0xFFFF6600),
+                            icon: const Icon(Icons.nfc),
+                            label: const Text("PAYER")
+                        )
+                    )
+                ]
+            )
+        )
     );
   }
 }

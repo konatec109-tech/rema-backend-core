@@ -10,11 +10,13 @@ class SecurityManager {
   SecurityManager._internal();
 
   // Le coffre-fort sécurisé (Keystore / Keychain)
-  // C'est ici que la Clé Privée dort. Elle ne sort JAMAIS en clair.
   final _storage = const FlutterSecureStorage();
   
-  // Algorithme Ed25519 (Standard Industriel - Doc Section 4.1)
+  // Algorithme de signature (Ed25519)
   final _algorithm = Ed25519();
+  
+  // 🔥 AJOUT : Algorithme de hachage pour le PIN (SHA-256)
+  final _hashAlgo = Sha256();
   
   SimpleKeyPair? _cachedKeyPair;
 
@@ -22,26 +24,21 @@ class SecurityManager {
   // 1. GESTION DES CLÉS (KEY MANAGEMENT)
   // ===========================================================================
   
-  // Récupère la Clé Publique au format HEX (pour envoi au serveur/marchand)
+  // Récupère la Clé Publique (Hex)
   Future<String> getPublicKey() async {
-    // 1. Si en cache RAM, on renvoie direct (Performance)
     if (_cachedKeyPair != null) {
       final pub = await _cachedKeyPair!.extractPublicKey();
       return _bytesToHex(pub.bytes);
     }
 
-    // 2. Sinon, on cherche dans le stockage sécurisé
     String? storedSeedHex = await _storage.read(key: 'user_private_seed_v2');
 
     if (storedSeedHex != null) {
-      // Restauration de la clé existante
       final seed = _hexToBytes(storedSeedHex);
       _cachedKeyPair = await _algorithm.newKeyPairFromSeed(seed);
     } else {
-      // Création d'une nouvelle identité (Premier lancement)
       _cachedKeyPair = await _algorithm.newKeyPair();
       final seed = await _cachedKeyPair!.extractPrivateKeyBytes();
-      // On sauvegarde la graine (seed) de manière chiffrée
       await _storage.write(key: 'user_private_seed_v2', value: _bytesToHex(seed));
     }
 
@@ -50,9 +47,9 @@ class SecurityManager {
   }
 
   // ===========================================================================
-  // 2. SIGNER UNE TRANSACTION (SIGNING)
+  // 2. SIGNATURE (OFFLINE PAYMENT)
   // ===========================================================================
-  // Signe le payload "UUID|NONCE|..." avec la clé privée
+  
   Future<String> sign(String message) async {
     try {
       if (_cachedKeyPair == null) await getPublicKey(); // Force init
@@ -64,7 +61,6 @@ class SecurityManager {
         keyPair: _cachedKeyPair!,
       );
 
-      // On retourne la signature en Hexadécimal (64 octets -> 128 chars hex)
       return _bytesToHex(signature.bytes);
     } catch (e) {
       print("❌ Erreur Signature: $e");
@@ -73,9 +69,9 @@ class SecurityManager {
   }
 
   // ===========================================================================
-  // 3. VÉRIFIER UNE SIGNATURE (VERIFYING)
+  // 3. VÉRIFICATION (SÉCURITÉ MARCHAND)
   // ===========================================================================
-  // Utilisé par le Marchand pour vérifier que le Client est légitime
+  
   Future<bool> verifySignature(String message, String signatureHex, String publicKeyHex) async {
     try {
       final messageBytes = utf8.encode(message);
@@ -98,16 +94,26 @@ class SecurityManager {
   }
 
   // ===========================================================================
-  // 4. OUTILS UTILITAIRES (HEX CONVERSION)
+  // 4. HACHAGE PIN (C'EST LA FONCTION QUI MANQUAIT !) ⚠️
   // ===========================================================================
-  // Convertit [0, 255] -> "00ff"
+  
+  // Transforme "1234" en un hash SHA-256 sécurisé
+  Future<String> hashPin(String pin) async {
+    final pinBytes = utf8.encode(pin);
+    final hash = await _hashAlgo.hash(pinBytes);
+    return _bytesToHex(hash.bytes);
+  }
+
+  // ===========================================================================
+  // 5. OUTILS UTILITAIRES (HEX)
+  // ===========================================================================
+  
   String _bytesToHex(List<int> bytes) {
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
-  // Convertit "00ff" -> [0, 255]
   List<int> _hexToBytes(String hex) {
-    if (hex.length % 2 != 0) hex = '0$hex'; // Padding sécurité
+    if (hex.length % 2 != 0) hex = '0$hex';
     List<int> bytes = [];
     for (int i = 0; i < hex.length; i += 2) {
       bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));

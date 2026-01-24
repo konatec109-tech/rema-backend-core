@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'security.dart';
 
 class ApiService {
-  // ⚠️ Vérifie que c'est bien l'URL de ton serveur (Render ou IP locale)
+  // ⚠️ C'est l'URL de ton serveur Render (Backend Core)
   static const String BASE_URL = "https://rema-backend-core.onrender.com"; 
   
   final Dio _dio = Dio(BaseOptions(
@@ -27,26 +27,28 @@ class ApiService {
       print("🔄 Recharge Cloud demandée: $amount");
       
       // On envoie un entier strict au serveur
+      // Correspond à la route backend: /users/recharge-offline
       final response = await _dio.post("/users/recharge-offline", data: {
         "amount": amount, 
         "phone": phone
       });
 
       if (response.statusCode == 200) {
+        // Si le serveur valide, on crée l'argent dans le téléphone
         String key = 'vault_balance_v3_$phone';
-        int current = prefs.getInt(key) ?? 0; // 🔥 Lecture INT
+        int current = prefs.getInt(key) ?? 0; 
         await prefs.setInt(key, current + amount);
         return true;
       }
       return false;
     } catch (e) {
-      print("Erreur Recharge: $e");
+      print("❌ Erreur Recharge: $e");
       return false;
     }
   }
 
   // ===========================================================================
-  // 2. SYNCHRONISATION DES TRANSACTIONS (BATCH UPLOAD + BLACKLIST)
+  // 2. SYNCHRONISATION DES TRANSACTIONS (UPLOAD)
   // ===========================================================================
   Future<Map<String, dynamic>> syncTransactions() async {
     try {
@@ -54,44 +56,47 @@ class ApiService {
       String phone = prefs.getString('user_phone') ?? "";
       String myPk = await SecurityManager().getPublicKey();
 
-      // A. MISE À JOUR SÉCURITÉ (Le "Gossip Protocol") [Doc Section 7.1]
-      // Avant d'envoyer nos ventes, on télécharge la liste des téléphones volés.
+      // Étape 1 : On met à jour la liste des voleurs avant de sync
       await updateSecurityBlacklist();
 
-      // B. PRÉPARATION DES DONNÉES
+      // Étape 2 : On récupère l'historique local
       List<String> history = prefs.getStringList('history_v3_$phone') ?? [];
       if (history.isEmpty) return {"status": "empty", "message": "Rien à sync."};
 
       List<Map<String, dynamic>> transactionsToSend = [];
 
+      // Étape 3 : On prépare le colis pour le serveur
       for (String jsonStr in history) {
         Map<String, dynamic> tx = jsonDecode(jsonStr);
         
-        // 🔍 FILTRE INTELLIGENT :
-        // On ne synchronise que ce qui est complet et signé.
+        // On ne sync que ce qui a une signature crypto valide
         if (tx['signature'] != null && tx['signature'].toString().isNotEmpty) {
           
-          // MAPPING STRICT vers le Backend Python (SingleTransaction)
           transactionsToSend.add({
-            "uuid": tx['uuid'],           // [Doc] UUID v4
+            // Champs obligatoires du protocole
+            "uuid": tx['uuid'],
             "protocol_ver": tx['protocol_ver'] ?? 1,
-            "nonce": tx['nonce'],         // [Doc] Anti-Rejeu
-            "timestamp": tx['timestamp'], // [Doc] Time
+            "nonce": tx['nonce'],
+            "timestamp": tx['timestamp'],
             "sender_pk": tx['sender_pk'],
-            "receiver_pk": myPk,          // C'est moi qui synchronise
-            "amount": tx['amount'],       // 🔥 INT STRICT
+            "receiver_pk": myPk, // C'est moi qui sync, donc je suis le receveur (ou l'émetteur sync)
+            "amount": tx['amount'],
             "currency": tx['currency'] ?? 952,
-            "signature": tx['signature'], // [Doc] Preuve Ed25519
-            "type": "OFFLINE_PAYMENT"
+            "signature": tx['signature'],
+            "type": "OFFLINE_PAYMENT",
+            
+            // 🔥 CRITIQUE : C'est ici qu'on envoie l'info Visa/FedaPay au serveur
+            "metadata": tx['metadata'] ?? "{}" 
           });
         }
       }
 
       if (transactionsToSend.isEmpty) return {"status": "empty"};
 
-      print("📤 Envoi de ${transactionsToSend.length} transactions au Cloud...");
+      print("📤 Envoi de ${transactionsToSend.length} transactions vers le Cloud...");
 
-      // C. ENVOI DU BATCH AU SERVEUR
+      // Étape 4 : Envoi du Batch (Carton)
+      // Correspond à la route backend: /transactions/sync
       final response = await _dio.post("/transactions/sync", data: {
         "merchant_pk": myPk,
         "batch_id": "${DateTime.now().millisecondsSinceEpoch}",
@@ -101,26 +106,23 @@ class ApiService {
         "transactions": transactionsToSend
       });
 
-      print("📥 Réponse Serveur: ${response.statusCode}");
-
       if (response.statusCode == 200) {
-        // Optionnel : Nettoyer l'historique local ou le marquer "synced"
-        // Pour l'instant, on laisse tel quel pour la traçabilité locale
+        print("✅ Sync Réussie !");
         return response.data; 
       } else {
+        print("⚠️ Erreur Serveur: ${response.statusCode} - ${response.data}");
         return {"status": "error", "message": "Erreur ${response.statusCode}: ${response.data}"};
       }
 
     } catch (e) {
-      print("❌ CRASH SYNC: $e");
+      print("❌ Erreur Connexion Sync: $e");
       return {"status": "error", "message": "Erreur connexion: $e"};
     }
   }
 
   // ===========================================================================
-  // 3. RECUPERER LE SOLDE (FETCH BALANCE)
+  // 3. VÉRIFIER SOLDE ONLINE (BANQUE)
   // ===========================================================================
-  // 🔥 Retourne un INT maintenant
   Future<int?> fetchUserBalance() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -166,7 +168,8 @@ class ApiService {
         print("✅ Blacklist mise à jour : ${bannedKeys.length} clés bannies.");
       }
     } catch (e) {
-      print("⚠️ Impossible de mettre à jour la blacklist (Mode Offline maintenu)");
+      // Si pas de connexion, on garde l'ancienne liste, ce n'est pas grave.
+      print("⚠️ Pas de connexion pour maj blacklist.");
     }
   }
 }
