@@ -42,6 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
     RemaPay.onTransactionReceived = (tx) {
       _loadData(); 
       if(mounted) {
+         // Gestion robuste du type (int ou double)
          double amount = (tx['amount'] is int) ? (tx['amount'] as int).toDouble() : (tx['amount'] as double);
          String sender = tx['phone'] ?? "Inconnu";
          _showSuccessPopup(amount, "Reçu de $sender");
@@ -64,7 +65,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
-    double v = await RemaPay.getOfflineBalance();
+    
+    // CORRECTION 1 : Conversion explicite en double
+    double v = (await RemaPay.getOfflineBalance()).toDouble();
+    
     List<Map<String, dynamic>> h = await RemaPay.getHistory();
     _fetchCloudBalance(); // Appel immédiat au cloud
 
@@ -79,7 +83,10 @@ class _HomeScreenState extends State<HomeScreen> {
   
   Future<void> _fetchCloudBalance() async {
     final api = ApiService();
-    double? online = await api.fetchUserBalance();
+    // CORRECTION 2 : Gestion du null et conversion en double
+    var bal = await api.fetchUserBalance();
+    double? online = bal?.toDouble();
+
     if(online != null && mounted) {
       setState(() => _onlineBalance = online);
     }
@@ -170,7 +177,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // Petit loader
     showDialog(barrierDismissible: false, context: context, builder: (_) => const Center(child: CircularProgressIndicator(color: Colors.orange)));
     try {
-      await RemaPay.payTarget(id, name, amount);
+      // CORRECTION 3 : Conversion en entier pour l'envoi
+      await RemaPay.payTarget(id, name, amount.toInt());
+      
       if (mounted) Navigator.pop(context); 
       _loadData(); 
       _showSuccessPopup(amount, "Envoyé avec succès !");

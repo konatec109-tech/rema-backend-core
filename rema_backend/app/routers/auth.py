@@ -11,7 +11,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
     
     # 1. Vérification doublon
-    existing_user = db.query(models.User).filter(models.User.phone_number == user.phone).first()
+    # CORRECTION : On utilise user.phone_number au lieu de user.phone
+    existing_user = db.query(models.User).filter(models.User.phone_number == user.phone_number).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Ce numéro est déjà utilisé")
 
@@ -21,11 +22,12 @@ def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
 
     # 3. Création de l'utilisateur avec la VRAIE clé du mobile
     new_user = models.User(
-        phone_number=user.phone,
+        phone_number=user.phone_number, # <--- CORRIGÉ ICI
         pin_hash=user.pin_hash,  
         full_name=user.full_name,
         public_key=user.public_key, # <--- ON SAUVEGARDE LA VRAIE CLÉ ICI
         role=user.role,
+        device_hardware_id=user.device_hardware_id, # <--- AJOUTÉ (Important pour la sécurité)
         balance=50000.0, # Bonus de bienvenue
         offline_reserved_amount=0.0
     )

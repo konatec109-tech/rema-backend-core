@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:dio/dio.dart'; // <--- INDISPENSABLE POUR PARLER AU SERVEUR
+import 'package:dio/dio.dart';
 
 import '../logic/security.dart';
 import 'home_screen.dart';
@@ -23,7 +23,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isLoading = false;
   String _loadingText = "CONNEXION"; 
   
-  // ⚠️ Mets ici l'IP de ton serveur (10.0.2.2 pour émulateur, ou ton IP Render)
+  // ⚠️ Vérifie que c'est la bonne URL (Render ou locale)
   static const String BASE_URL = "https://rema-backend-core.onrender.com"; 
   
   final Color kPrimaryColor = const Color(0xFFFF6600);
@@ -50,23 +50,31 @@ class _AuthScreenState extends State<AuthScreen> {
       // 2. ENVOI AU SERVEUR (Inscription réelle)
       setState(() => _loadingText = "Enregistrement Blockchain...");
       
-      final dio = Dio(BaseOptions(baseUrl: BASE_URL, connectTimeout: const Duration(seconds: 5)));
+      final dio = Dio(BaseOptions(baseUrl: BASE_URL, connectTimeout: const Duration(seconds: 10)));
       
+      // --- CORRECTION ICI ---
+      // On génère un ID unique temporaire pour satisfaire le serveur
+      String uniqueDeviceId = "android_${DateTime.now().millisecondsSinceEpoch}";
+
       try {
         await dio.post("/auth/signup", data: {
-          "phone": _phoneCtrl.text,
+          // CORRECTION 1 : "phone" devient "phone_number" pour correspondre au serveur
+          "phone_number": _phoneCtrl.text,
+          
+          // CORRECTION 2 : Ajout du champ obligatoire "device_hardware_id"
+          "device_hardware_id": uniqueDeviceId,
+          
           "pin_hash": _pinCtrl.text,
           "full_name": _nameCtrl.text,
-          "public_key": myPublicKey, // <--- C'EST LA CLEF DU SUCCÈS
+          "public_key": myPublicKey,
           "role": "user"
         });
       } on DioException catch (e) {
         // Si erreur 400, c'est peut-être que l'user existe déjà.
-        // Dans ce cas, on essaie de se connecter.
         if (e.response?.statusCode == 400) {
            print("Utilisateur existe déjà, tentative de suite...");
         } else {
-           throw e; // Autre erreur grave
+           rethrow; // Relance l'erreur pour le catch global
         }
       }
 
@@ -75,6 +83,8 @@ class _AuthScreenState extends State<AuthScreen> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_name', _nameCtrl.text);
       await prefs.setString('user_phone', _phoneCtrl.text);
+      // On sauvegarde aussi l'ID hardware généré
+      await prefs.setString('device_id', uniqueDeviceId);
       
       if (mounted) {
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
@@ -84,11 +94,16 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() => _isLoading = false);
       String msg = "Erreur Connexion";
       if (e is DioException) {
-         msg = "Erreur Serveur: ${e.message}";
-         if (e.response != null) msg = "Refus Serveur: ${e.response?.data}";
+         // Affiche le message d'erreur exact du serveur pour débugger
+         if (e.response != null) {
+           msg = "Refus Serveur (${e.response?.statusCode}): ${e.response?.data}";
+         } else {
+           msg = "Erreur Serveur: ${e.message}";
+         }
       }
+      print("ERREUR COMPLÈTE: $e"); // Log console pour voir les détails
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red)
+        SnackBar(content: Text(msg), backgroundColor: Colors.red, duration: const Duration(seconds: 5))
       );
     }
   }
