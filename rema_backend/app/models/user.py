@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, Integer, String, BigInteger, DateTime
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -14,10 +14,13 @@ class User(Base):
     public_key = Column(String, nullable=False)
     role = Column(String, default="USER")
     
-    # --- LES AJOUTS QUI CORRIGENT L'ERREUR ---
+    # Device ID (Sécurité)
     device_hardware_id = Column(String, nullable=True)
-    balance = Column(Float, default=50000.0, nullable=False)
-    offline_reserved_amount = Column(Float, default=0.0, nullable=False)
-    # -----------------------------------------
+
+    # --- FINANCE (VERSION ATOMIC) ---
+    # On utilise BigInteger (Entiers) pour éviter les erreurs d'arrondi
+    balance_atomic = Column(BigInteger, default=50000, nullable=False)
+    offline_reserved_atomic = Column(BigInteger, default=0, nullable=False)
+    # -------------------------------
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

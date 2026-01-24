@@ -1,29 +1,25 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
 
-# --- INPUT : Ce que l'App envoie pour s'inscrire ---
+# --- INPUT (Ce que le mobile envoie) ---
 class UserCreate(BaseModel):
-    phone_number: str 
-    full_name: str
+    # ATTENTION : C'est bien "phone_number" ici
+    phone_number: str = Field(..., description="Format international")
     pin_hash: str
-    public_key: str
-    # Optionnel pour éviter le crash si l'app ne l'envoie pas
-    device_hardware_id: Optional[str] = "unknown_device" 
-    role: str = "USER"
+    full_name: str
+    role: str = "user"
+    public_key: str 
+    device_hardware_id: str
 
-# --- OUTPUT : Ce que le serveur répond ---
-class UserOut(BaseModel):
+# --- OUTPUT (Ce que le mobile reçoit) ---
+class UserResponse(BaseModel):
     id: int
     phone_number: str
     full_name: str
-    balance: float
+    is_active: bool = True
     created_at: datetime
+    balance_atomic: int      
 
     class Config:
         from_attributes = True
-
-# --- INPUT : Login ---
-class UserLogin(BaseModel):
-    phone_number: str
-    pin: str
